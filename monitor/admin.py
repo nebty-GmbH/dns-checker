@@ -157,11 +157,16 @@ class RecordLogAdmin(admin.ModelAdmin):
     def has_snapshot(self, obj):
         """Display if this record log has an associated snapshot."""
         try:
-            if hasattr(obj, 'snapshot') and obj.snapshot:
-                return format_html('<span style="color: green;">Yes</span>')
-            else:
-                return format_html('<span style="color: gray;">No</span>')
-        except:
+            from django.core.exceptions import ObjectDoesNotExist
+            if hasattr(obj, 'snapshot'):
+                try:
+                    snapshot = obj.snapshot
+                    if snapshot:
+                        return format_html('<span style="color: green;">Yes</span>')
+                except ObjectDoesNotExist:
+                    pass
+            return format_html('<span style="color: gray;">No</span>')
+        except Exception:
             return format_html('<span style="color: gray;">No</span>')
     has_snapshot.short_description = 'Snapshot'
     has_snapshot.boolean = True
@@ -169,38 +174,54 @@ class RecordLogAdmin(admin.ModelAdmin):
     def snapshot_link(self, obj):
         """Display link to associated snapshot if it exists."""
         try:
-            if hasattr(obj, 'snapshot') and obj.snapshot:
-                url = reverse('admin:monitor_domainsnapshot_change', args=[obj.snapshot.id])
-                return format_html('<a href="{}">View Snapshot</a>', url)
-            else:
-                return "No snapshot"
-        except:
+            from django.core.exceptions import ObjectDoesNotExist
+            if hasattr(obj, 'snapshot'):
+                try:
+                    snapshot = obj.snapshot
+                    if snapshot:
+                        url = reverse('admin:monitor_domainsnapshot_change', args=[snapshot.id])
+                        return format_html('<a href="{}">View Snapshot</a>', url)
+                except ObjectDoesNotExist:
+                    pass
+            return "No snapshot"
+        except Exception:
             return "No snapshot"
     snapshot_link.short_description = 'Associated Snapshot'
     
     def ip_info_count(self, obj):
         """Display count of associated IP information."""
-        count = obj.ip_info_entries.count()
-        if count > 0:
-            url = reverse('admin:monitor_recordlogipinfo_changelist') + f'?record_log__id__exact={obj.id}'
-            return format_html('<a href="{}">{} IPs</a>', url, count)
-        return "0 IPs"
+        try:
+            count = obj.ip_info_entries.count()
+            if count > 0:
+                url = reverse('admin:monitor_recordlogipinfo_changelist') + f'?record_log__id__exact={obj.id}'
+                return format_html('<a href="{}">{} IPs</a>', url, count)
+            return "0 IPs"
+        except Exception as e:
+            return "Error"
     ip_info_count.short_description = 'IP Info'
     
     def ip_info_summary(self, obj):
         """Display summary of IP WHOIS information."""
-        ip_info_entries = obj.ip_info_entries.all()
-        if not ip_info_entries:
-            return "No IP information available"
-        
-        summary_lines = []
-        for entry in ip_info_entries:
-            whois = entry.ip_whois_info
-            line = f"• {entry.ip_address}: {whois.display_info}"
-            summary_lines.append(line)
-        
-        summary_text = "\n".join(summary_lines)
-        return format_html('<pre style="font-size: 12px; margin: 0;">{}</pre>', summary_text)
+        try:
+            ip_info_entries = obj.ip_info_entries.all()
+            if not ip_info_entries:
+                return "No IP information available"
+            
+            summary_lines = []
+            for entry in ip_info_entries:
+                try:
+                    if entry.ip_whois_info:
+                        line = f"• {entry.ip_address}: {entry.ip_whois_info.display_info}"
+                    else:
+                        line = f"• {entry.ip_address}: No WHOIS data"
+                    summary_lines.append(line)
+                except Exception:
+                    summary_lines.append(f"• {entry.ip_address}: Error loading WHOIS data")
+            
+            summary_text = "\n".join(summary_lines)
+            return format_html('<pre style="font-size: 12px; margin: 0;">{}</pre>', summary_text)
+        except Exception as e:
+            return f"Error loading IP information: {str(e)}"
     ip_info_summary.short_description = 'IP WHOIS Summary'
     
     def has_add_permission(self, request):
