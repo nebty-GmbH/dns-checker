@@ -1,0 +1,13 @@
+# Sample domains for DNS monitoring
+# One domain per line, comments start with #
+
+google.com
+github.com
+stackoverflow.com
+python.org
+djangoproject.com
+redis.io
+cloudflare.com
+amazon.com
+microsoft.com
+apple.com
