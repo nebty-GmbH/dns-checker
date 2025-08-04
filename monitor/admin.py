@@ -589,34 +589,46 @@ class RecordLogIPInfoAdmin(admin.ModelAdmin):
     
     def organization_info(self, obj):
         """Display organization information."""
-        if obj.ip_whois_info.organization:
-            org = obj.ip_whois_info.organization
-            if len(org) > 25:
-                return f"{org[:25]}..."
-            return org
+        try:
+            if obj.ip_whois_info and obj.ip_whois_info.organization:
+                org = obj.ip_whois_info.organization
+                if len(org) > 25:
+                    return f"{org[:25]}..."
+                return org
+        except Exception:
+            pass
         return "Unknown"
     organization_info.short_description = 'Organization'
     
     def asn_info(self, obj):
         """Display ASN information."""
-        if obj.ip_whois_info.asn:
-            asn = obj.ip_whois_info.asn.replace('AS', '') if obj.ip_whois_info.asn.startswith('AS') else obj.ip_whois_info.asn
-            return f"AS{asn}"
+        try:
+            if obj.ip_whois_info and obj.ip_whois_info.asn:
+                asn = obj.ip_whois_info.asn.replace('AS', '') if obj.ip_whois_info.asn.startswith('AS') else obj.ip_whois_info.asn
+                return f"AS{asn}"
+        except Exception:
+            pass
         return "Unknown"
     asn_info.short_description = 'ASN'
     
     def country_info(self, obj):
         """Display country information."""
-        if obj.ip_whois_info.country:
-            return obj.ip_whois_info.country
+        try:
+            if obj.ip_whois_info and obj.ip_whois_info.country:
+                return obj.ip_whois_info.country
+        except Exception:
+            pass
         return "Unknown"
     country_info.short_description = 'Country'
     
     def whois_detail_link(self, obj):
         """Display link to detailed WHOIS information."""
-        if obj.ip_whois_info:
-            url = reverse('admin:monitor_ipwhoisinfo_change', args=[obj.ip_whois_info.id])
-            return format_html('<a href="{}">View WHOIS Details</a>', url)
+        try:
+            if obj.ip_whois_info:
+                url = reverse('admin:monitor_ipwhoisinfo_change', args=[obj.ip_whois_info.id])
+                return format_html('<a href="{}">View WHOIS Details</a>', url)
+        except Exception:
+            pass
         return "No WHOIS data"
     whois_detail_link.short_description = 'WHOIS Details'
     
