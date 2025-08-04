@@ -2,7 +2,8 @@ from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
-from .models import Domain, RecordLog
+from django.utils import timezone
+from .models import Domain, RecordLog, APIKey
 
 
 @admin.register(Domain)
@@ -147,6 +148,56 @@ class RecordLogAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         """Allow deletion of old logs."""
         return True
+
+
+@admin.register(APIKey)
+class APIKeyAdmin(admin.ModelAdmin):
+    """Admin configuration for API Key model."""
+    
+    list_display = ['name', 'user', 'is_active', 'masked_key', 'created_at', 'last_used']
+    list_filter = ['is_active', 'created_at', 'last_used', 'user']
+    search_fields = ['name', 'user__username']
+    list_editable = ['is_active']
+    readonly_fields = ['key', 'created_at', 'last_used', 'full_key_display']
+    
+    fieldsets = (
+        (None, {
+            'fields': ('name', 'user', 'is_active')
+        }),
+        ('API Key Information', {
+            'fields': ('full_key_display', 'key'),
+            'description': 'The API key will be generated automatically when you save. Make sure to copy it as it will not be shown in full again.'
+        }),
+        ('Usage Information', {
+            'fields': ('created_at', 'last_used'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def masked_key(self, obj):
+        """Display masked version of the API key."""
+        return obj.mask_key()
+    masked_key.short_description = 'API Key'
+    
+    def full_key_display(self, obj):
+        """Display full API key only when creating/just created."""
+        if obj.pk and obj.key:
+            return format_html(
+                '<div style="background: #f8f9fa; padding: 10px; border: 1px solid #dee2e6; border-radius: 4px;">'
+                '<strong>Full API Key:</strong><br>'
+                '<code style="font-size: 14px; color: #495057;">{}</code><br>'
+                '<small style="color: #6c757d;">⚠️ Copy this key now - it will not be shown in full again!</small>'
+                '</div>',
+                obj.key
+            )
+        return "API key will be generated when you save this record."
+    full_key_display.short_description = 'Generated API Key'
+    
+    def save_model(self, request, obj, form, change):
+        """Update last_used when key is used via admin."""
+        if not change:  # Creating new API key
+            obj.user = obj.user or request.user
+        super().save_model(request, obj, form, change)
 
 
 # Customize admin site headers
