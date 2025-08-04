@@ -32,6 +32,9 @@ DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS_STR = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=str)
 ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_STR.split(',')]
 
+# Add testserver for Django test client
+ALLOWED_HOSTS.append('testserver')
+
 # Add your Dokku domain
 DOKKU_DOMAIN = config('DOKKU_DOMAIN', default='', cast=str)
 if DOKKU_DOMAIN:
@@ -138,6 +141,11 @@ LOGGING = {
         'monitor': {
             'handlers': ['file', 'console'],
             'level': 'INFO',
+            'propagate': True,
+        },
+        'monitor.admin': {
+            'handlers': ['file', 'console'],
+            'level': 'DEBUG',
             'propagate': True,
         },
     },

@@ -1,9 +1,19 @@
+import logging
 from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils import timezone
+from django.core.exceptions import ObjectDoesNotExist
 from .models import Domain, RecordLog, APIKey, MonitorSettings, DomainSnapshot, IPWhoisInfo, RecordLogIPInfo
+
+# Import tasks at module level to avoid circular imports
+try:
+    from .tasks import check_domain_a_records
+except ImportError:
+    check_domain_a_records = None
+
+logger = logging.getLogger('monitor.admin')
 
 
 @admin.register(Domain)
@@ -76,17 +86,30 @@ class DomainAdmin(admin.ModelAdmin):
     
     def check_domains_now(self, request, queryset):
         """Action to manually trigger DNS checks for selected domains."""
-        from .tasks import check_domain_a_records
+        if check_domain_a_records is None:
+            try:
+                from .tasks import check_domain_a_records as task_func
+            except ImportError as e:
+                logger.error(f"Failed to import check_domain_a_records task: {e}")
+                self.message_user(request, "Failed to import DNS check task. Please check if Celery is properly configured.", level='ERROR')
+                return
+        else:
+            task_func = check_domain_a_records
         
         checked_count = 0
         for domain in queryset:
             try:
-                check_domain_a_records.delay(domain.id)
+                task_func.delay(domain.id)
                 checked_count += 1
+                logger.info(f"Scheduled DNS check for domain: {domain.name}")
             except Exception as e:
-                self.message_user(request, f"Failed to schedule check for {domain.name}: {str(e)}", level='ERROR')
+                error_msg = f"Failed to schedule check for {domain.name}: {str(e)}"
+                logger.error(error_msg)
+                self.message_user(request, error_msg, level='ERROR')
         
-        self.message_user(request, f"Scheduled DNS checks for {checked_count} domains.")
+        success_msg = f"Scheduled DNS checks for {checked_count} domains."
+        logger.info(success_msg)
+        self.message_user(request, success_msg)
     check_domains_now.short_description = "Check selected domains now"
     
     def activate_domains(self, request, queryset):
@@ -157,76 +180,114 @@ class RecordLogAdmin(admin.ModelAdmin):
     def has_snapshot(self, obj):
         """Display if this record log has an associated snapshot."""
         try:
-            from django.core.exceptions import ObjectDoesNotExist
+            # Use hasattr and try-catch to safely check for snapshot
             if hasattr(obj, 'snapshot'):
                 try:
                     snapshot = obj.snapshot
-                    if snapshot:
-                        return format_html('<span style="color: green;">Yes</span>')
+                    if snapshot and snapshot.id:
+                        return True
                 except ObjectDoesNotExist:
-                    pass
-            return format_html('<span style="color: gray;">No</span>')
-        except Exception:
-            return format_html('<span style="color: gray;">No</span>')
+                    logger.debug(f"Snapshot relation not found for RecordLog {obj.id}")
+                except Exception as e:
+                    logger.warning(f"Error checking snapshot for RecordLog {obj.id}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error in has_snapshot for RecordLog {obj.id}: {e}")
+            return None
     has_snapshot.short_description = 'Snapshot'
     has_snapshot.boolean = True
     
     def snapshot_link(self, obj):
         """Display link to associated snapshot if it exists."""
         try:
-            from django.core.exceptions import ObjectDoesNotExist
             if hasattr(obj, 'snapshot'):
                 try:
                     snapshot = obj.snapshot
-                    if snapshot:
+                    if snapshot and snapshot.id:
                         url = reverse('admin:monitor_domainsnapshot_change', args=[snapshot.id])
                         return format_html('<a href="{}">View Snapshot</a>', url)
                 except ObjectDoesNotExist:
-                    pass
+                    logger.debug(f"Snapshot relation not found for RecordLog {obj.id}")
+                except Exception as e:
+                    logger.warning(f"Error getting snapshot link for RecordLog {obj.id}: {e}")
             return "No snapshot"
-        except Exception:
-            return "No snapshot"
+        except Exception as e:
+            logger.error(f"Unexpected error in snapshot_link for RecordLog {obj.id}: {e}")
+            return "Error"
     snapshot_link.short_description = 'Associated Snapshot'
     
     def ip_info_count(self, obj):
         """Display count of associated IP information."""
         try:
+            if not hasattr(obj, 'ip_info_entries'):
+                logger.debug(f"RecordLog {obj.id} has no ip_info_entries relation")
+                return "0 IPs"
+            
             count = obj.ip_info_entries.count()
             if count > 0:
                 url = reverse('admin:monitor_recordlogipinfo_changelist') + f'?record_log__id__exact={obj.id}'
                 return format_html('<a href="{}">{} IPs</a>', url, count)
             return "0 IPs"
         except Exception as e:
+            logger.error(f"Error getting ip_info_count for RecordLog {obj.id}: {e}")
             return "Error"
     ip_info_count.short_description = 'IP Info'
     
     def ip_info_summary(self, obj):
         """Display summary of IP WHOIS information."""
         try:
+            if not hasattr(obj, 'ip_info_entries'):
+                logger.debug(f"RecordLog {obj.id} has no ip_info_entries relation")
+                return "No IP information available (relation missing)"
+            
             ip_info_entries = obj.ip_info_entries.all()
-            if not ip_info_entries:
+            if not ip_info_entries.exists():
                 return "No IP information available"
             
             summary_lines = []
             for entry in ip_info_entries:
                 try:
-                    if entry.ip_whois_info and hasattr(entry.ip_whois_info, 'display_info'):
-                        line = f"• {entry.ip_address}: {entry.ip_whois_info.display_info}"
-                    elif entry.ip_whois_info:
-                        # Fallback if display_info method doesn't exist
-                        org = getattr(entry.ip_whois_info, 'organization', None) or 'Unknown'
-                        asn = getattr(entry.ip_whois_info, 'asn', None) or 'Unknown'
-                        line = f"• {entry.ip_address}: {org} (AS{asn})"
+                    ip_address = getattr(entry, 'ip_address', 'Unknown IP')
+                    
+                    # Check if ip_whois_info exists and is not None
+                    if hasattr(entry, 'ip_whois_info') and entry.ip_whois_info:
+                        whois_info = entry.ip_whois_info
+                        
+                        # Try to use display_info property
+                        if hasattr(whois_info, 'display_info'):
+                            try:
+                                line = f"• {ip_address}: {whois_info.display_info}"
+                            except Exception as display_error:
+                                logger.warning(f"Error getting display_info for IP {ip_address}: {display_error}")
+                                # Fallback to manual formatting
+                                org = getattr(whois_info, 'organization', None) or 'Unknown'
+                                asn = getattr(whois_info, 'asn', None) or 'Unknown'
+                                line = f"• {ip_address}: {org} (AS{asn})"
+                        else:
+                            # Fallback if display_info method doesn't exist
+                            org = getattr(whois_info, 'organization', None) or 'Unknown'
+                            asn = getattr(whois_info, 'asn', None) or 'Unknown'
+                            line = f"• {ip_address}: {org} (AS{asn})"
                     else:
-                        line = f"• {entry.ip_address}: No WHOIS data"
+                        line = f"• {ip_address}: No WHOIS data"
+                    
                     summary_lines.append(line)
-                except Exception:
-                    summary_lines.append(f"• {entry.ip_address}: Error loading WHOIS data")
+                    
+                except Exception as entry_error:
+                    logger.warning(f"Error processing IP info entry {getattr(entry, 'id', 'unknown')}: {entry_error}")
+                    ip_address = getattr(entry, 'ip_address', 'Unknown IP')
+                    summary_lines.append(f"• {ip_address}: Error loading WHOIS data")
+            
+            if not summary_lines:
+                return "No IP information could be processed"
             
             summary_text = "\n".join(summary_lines)
             return format_html('<pre style="font-size: 12px; margin: 0;">{}</pre>', summary_text)
+            
         except Exception as e:
-            return f"Error loading IP information: {str(e)}"
+            error_msg = f"Error loading IP information: {str(e)}"
+            logger.error(f"Unexpected error in ip_info_summary for RecordLog {getattr(obj, 'id', 'unknown')}: {e}")
+            return error_msg
     ip_info_summary.short_description = 'IP WHOIS Summary'
     
     def has_add_permission(self, request):
@@ -458,10 +519,7 @@ class DomainSnapshotAdmin(admin.ModelAdmin):
     
     def has_error(self, obj):
         """Display error status."""
-        if obj.error_message:
-            return format_html('<span style="color: red;">Yes</span>')
-        else:
-            return format_html('<span style="color: green;">No</span>')
+        return bool(obj.error_message)
     has_error.short_description = 'Error'
     has_error.boolean = True
     
@@ -547,10 +605,7 @@ class IPWhoisInfoAdmin(admin.ModelAdmin):
     
     def has_error(self, obj):
         """Display error status."""
-        if obj.error_message:
-            return format_html('<span style="color: red;">Yes</span>')
-        else:
-            return format_html('<span style="color: green;">No</span>')
+        return bool(obj.error_message)
     has_error.short_description = 'Error'
     has_error.boolean = True
     
@@ -588,53 +643,74 @@ class RecordLogIPInfoAdmin(admin.ModelAdmin):
     
     def record_log_domain(self, obj):
         """Display the domain name from the record log."""
-        return obj.record_log.domain.name
+        try:
+            if hasattr(obj, 'record_log') and obj.record_log:
+                if hasattr(obj.record_log, 'domain') and obj.record_log.domain:
+                    return obj.record_log.domain.name
+                else:
+                    logger.warning(f"RecordLogIPInfo {getattr(obj, 'id', 'unknown')} has record_log but no domain")
+                    return "No domain"
+            else:
+                logger.warning(f"RecordLogIPInfo {getattr(obj, 'id', 'unknown')} has no record_log")
+                return "No record log"
+        except Exception as e:
+            logger.error(f"Error getting domain for RecordLogIPInfo {getattr(obj, 'id', 'unknown')}: {e}")
+            return "Error"
     record_log_domain.short_description = 'Domain'
     record_log_domain.admin_order_field = 'record_log__domain__name'
     
     def organization_info(self, obj):
         """Display organization information."""
         try:
-            if obj.ip_whois_info and obj.ip_whois_info.organization:
-                org = obj.ip_whois_info.organization
-                if len(org) > 25:
-                    return f"{org[:25]}..."
-                return org
-        except Exception:
-            pass
-        return "Unknown"
+            if hasattr(obj, 'ip_whois_info') and obj.ip_whois_info:
+                org = getattr(obj.ip_whois_info, 'organization', None)
+                if org:
+                    if len(org) > 25:
+                        return f"{org[:25]}..."
+                    return org
+            return "Unknown"
+        except Exception as e:
+            logger.error(f"Error getting organization for RecordLogIPInfo {getattr(obj, 'id', 'unknown')}: {e}")
+            return "Error"
     organization_info.short_description = 'Organization'
     
     def asn_info(self, obj):
         """Display ASN information."""
         try:
-            if obj.ip_whois_info and obj.ip_whois_info.asn:
-                asn = obj.ip_whois_info.asn.replace('AS', '') if obj.ip_whois_info.asn.startswith('AS') else obj.ip_whois_info.asn
-                return f"AS{asn}"
-        except Exception:
-            pass
-        return "Unknown"
+            if hasattr(obj, 'ip_whois_info') and obj.ip_whois_info:
+                asn = getattr(obj.ip_whois_info, 'asn', None)
+                if asn:
+                    asn_clean = asn.replace('AS', '') if asn.startswith('AS') else asn
+                    return f"AS{asn_clean}"
+            return "Unknown"
+        except Exception as e:
+            logger.error(f"Error getting ASN for RecordLogIPInfo {getattr(obj, 'id', 'unknown')}: {e}")
+            return "Error"
     asn_info.short_description = 'ASN'
     
     def country_info(self, obj):
         """Display country information."""
         try:
-            if obj.ip_whois_info and obj.ip_whois_info.country:
-                return obj.ip_whois_info.country
-        except Exception:
-            pass
-        return "Unknown"
+            if hasattr(obj, 'ip_whois_info') and obj.ip_whois_info:
+                country = getattr(obj.ip_whois_info, 'country', None)
+                if country:
+                    return country
+            return "Unknown"
+        except Exception as e:
+            logger.error(f"Error getting country for RecordLogIPInfo {getattr(obj, 'id', 'unknown')}: {e}")
+            return "Error"
     country_info.short_description = 'Country'
     
     def whois_detail_link(self, obj):
         """Display link to detailed WHOIS information."""
         try:
-            if obj.ip_whois_info:
+            if hasattr(obj, 'ip_whois_info') and obj.ip_whois_info and hasattr(obj.ip_whois_info, 'id'):
                 url = reverse('admin:monitor_ipwhoisinfo_change', args=[obj.ip_whois_info.id])
                 return format_html('<a href="{}">View WHOIS Details</a>', url)
-        except Exception:
-            pass
-        return "No WHOIS data"
+            return "No WHOIS data"
+        except Exception as e:
+            logger.error(f"Error getting WHOIS link for RecordLogIPInfo {getattr(obj, 'id', 'unknown')}: {e}")
+            return "Error"
     whois_detail_link.short_description = 'WHOIS Details'
     
     def has_add_permission(self, request):
