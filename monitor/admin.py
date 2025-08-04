@@ -210,8 +210,13 @@ class RecordLogAdmin(admin.ModelAdmin):
             summary_lines = []
             for entry in ip_info_entries:
                 try:
-                    if entry.ip_whois_info:
+                    if entry.ip_whois_info and hasattr(entry.ip_whois_info, 'display_info'):
                         line = f"• {entry.ip_address}: {entry.ip_whois_info.display_info}"
+                    elif entry.ip_whois_info:
+                        # Fallback if display_info method doesn't exist
+                        org = getattr(entry.ip_whois_info, 'organization', None) or 'Unknown'
+                        asn = getattr(entry.ip_whois_info, 'asn', None) or 'Unknown'
+                        line = f"• {entry.ip_address}: {org} (AS{asn})"
                     else:
                         line = f"• {entry.ip_address}: No WHOIS data"
                     summary_lines.append(line)
