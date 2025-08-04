@@ -2,8 +2,11 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
-from .models import Domain
-from .serializers import DomainSerializer, DomainCreateSerializer, DomainDetailSerializer
+from .models import Domain, DomainSnapshot, IPWhoisInfo
+from .serializers import (
+    DomainSerializer, DomainCreateSerializer, DomainDetailSerializer,
+    DomainSnapshotSerializer, DomainSnapshotDetailSerializer, IPWhoisInfoSerializer
+)
 from .authentication import APIKeyAuthentication
 
 
@@ -88,3 +91,64 @@ class DomainListAPIView(generics.ListAPIView):
             is_active = is_active.lower() in ['true', '1']
             queryset = queryset.filter(is_active=is_active)
         return queryset.order_by('name')
+
+
+class DomainSnapshotListAPIView(generics.ListAPIView):
+    """
+    API endpoint to list snapshots for a specific domain.
+    
+    GET /api/domains/{domain_name}/snapshots/
+    """
+    serializer_class = DomainSnapshotSerializer
+    authentication_classes = [APIKeyAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        """Get snapshots for the specified domain"""
+        domain_name = self.kwargs['domain_name'].lower()
+        domain = get_object_or_404(Domain, name=domain_name)
+        return domain.snapshots.all().order_by('-timestamp')
+
+
+class DomainSnapshotDetailAPIView(generics.RetrieveAPIView):
+    """
+    API endpoint to get detailed information about a specific snapshot.
+    
+    GET /api/snapshots/{snapshot_id}/
+    """
+    serializer_class = DomainSnapshotDetailSerializer
+    authentication_classes = [APIKeyAuthentication]
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'id'
+    lookup_url_kwarg = 'snapshot_id'
+    
+    def get_queryset(self):
+        return DomainSnapshot.objects.all()
+
+
+class IPWhoisInfoListAPIView(generics.ListAPIView):
+    """
+    API endpoint to list all WHOIS information.
+    
+    GET /api/whois/
+    """
+    queryset = IPWhoisInfo.objects.all().order_by('-created_at')
+    serializer_class = IPWhoisInfoSerializer
+    authentication_classes = [APIKeyAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class IPWhoisInfoDetailAPIView(generics.RetrieveAPIView):
+    """
+    API endpoint to get WHOIS information for a specific IP.
+    
+    GET /api/whois/{ip_address}/
+    """
+    serializer_class = IPWhoisInfoSerializer
+    authentication_classes = [APIKeyAuthentication]
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'ip_address'
+    lookup_url_kwarg = 'ip_address'
+    
+    def get_queryset(self):
+        return IPWhoisInfo.objects.all()

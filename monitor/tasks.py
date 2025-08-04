@@ -1,8 +1,11 @@
 import logging
 import dns.resolver
+import requests
+import time
+from ipwhois import IPWhois
 from celery import shared_task
 from django.utils import timezone
-from .models import Domain, RecordLog
+from .models import Domain, RecordLog, DomainSnapshot, IPWhoisInfo, RecordLogIPInfo
 
 logger = logging.getLogger('monitor')
 
@@ -60,8 +63,25 @@ def check_domain_a_records(self, domain_id):
             domain.last_known_ips = current_ips_string
             domain.save()
             
-            if is_change:
+            # Trigger snapshot capture for IP changes or initial domain check
+            is_initial_check = not previous_ips_string  # First time we're checking this domain
+            
+            if is_initial_check:
+                logger.info(f"Initial DNS check for {domain.name}: {current_ips_string}")
+                
+                # Capture initial snapshot for new domain
+                capture_domain_snapshot.delay(domain.id, record_log.id, is_initial=True)
+                
+                # Fetch WHOIS info for initial IPs
+                fetch_record_log_ip_info.delay(record_log.id)
+            elif is_change:
                 logger.info(f"DNS change detected for {domain.name}: {previous_ips_string} -> {current_ips_string}")
+                
+                # Capture snapshot due to IP change
+                capture_domain_snapshot.delay(domain.id, record_log.id, is_initial=False)
+                
+                # Fetch WHOIS info for changed IPs
+                fetch_record_log_ip_info.delay(record_log.id)
                 
                 # Send notification if enabled
                 if settings.email_notifications_enabled and settings.notification_email:
@@ -161,6 +181,389 @@ def check_domain_a_records(self, domain_id):
             pass
         
         # Re-raise for Celery retry mechanism
+        raise
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 120})
+def capture_domain_snapshot(self, domain_id, record_log_id=None, is_initial=False):
+    """
+    Capture an HTML snapshot of a domain's homepage.
+    
+    Args:
+        domain_id (int): The ID of the Domain object
+        record_log_id (int, optional): The ID of the RecordLog entry this snapshot is associated with
+        is_initial (bool): Whether this is the initial snapshot when domain was first added
+        
+    Returns:
+        dict: Result dictionary with success status and details
+    """
+    try:
+        # Get the domain from database
+        domain = Domain.objects.get(id=domain_id)
+        logger.info(f"Capturing snapshot for domain: {domain.name}")
+        
+        # Get record log if provided
+        record_log = None
+        if record_log_id:
+            try:
+                record_log = RecordLog.objects.get(id=record_log_id)
+            except RecordLog.DoesNotExist:
+                logger.warning(f"RecordLog with ID {record_log_id} not found")
+        
+        # Prepare the URL - try both HTTP and HTTPS
+        urls_to_try = [
+            f"https://{domain.name}",
+            f"http://{domain.name}"
+        ]
+        
+        snapshot_data = None
+        
+        for url in urls_to_try:
+            try:
+                logger.info(f"Attempting to fetch {url}")
+                start_time = time.time()
+                
+                # Configure request with reasonable timeout and headers
+                headers = {
+                    'User-Agent': 'DNS-Checker-Bot/1.0 (Site Monitor)',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Accept-Encoding': 'gzip, deflate',
+                    'Connection': 'keep-alive',
+                }
+                
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    timeout=30,
+                    allow_redirects=True,
+                    verify=True  # Verify SSL certificates
+                )
+                
+                end_time = time.time()
+                response_time_ms = int((end_time - start_time) * 1000)
+                
+                # Check if we got a reasonable response
+                if response.status_code < 400:
+                    logger.info(f"Successfully fetched {url} - Status: {response.status_code}, Size: {len(response.text)} bytes")
+                    
+                    snapshot_data = {
+                        'html_content': response.text,
+                        'status_code': response.status_code,
+                        'response_time_ms': response_time_ms,
+                        'url_used': url
+                    }
+                    break
+                else:
+                    logger.warning(f"HTTP error for {url}: {response.status_code}")
+                    
+            except requests.exceptions.SSLError as e:
+                logger.warning(f"SSL error for {url}: {str(e)}")
+                continue
+            except requests.exceptions.Timeout as e:
+                logger.warning(f"Timeout for {url}: {str(e)}")
+                continue
+            except requests.exceptions.ConnectionError as e:
+                logger.warning(f"Connection error for {url}: {str(e)}")
+                continue
+            except Exception as e:
+                logger.warning(f"Unexpected error for {url}: {str(e)}")
+                continue
+        
+        # Create snapshot record
+        if snapshot_data:
+            # Success - save the snapshot
+            snapshot = DomainSnapshot.objects.create(
+                domain=domain,
+                record_log=record_log,
+                html_content=snapshot_data['html_content'],
+                status_code=snapshot_data['status_code'],
+                response_time_ms=snapshot_data['response_time_ms'],
+                is_initial_snapshot=is_initial
+            )
+            
+            logger.info(f"Snapshot captured successfully for {domain.name} - ID: {snapshot.id}, Size: {snapshot.content_length} bytes")
+            
+            return {
+                'success': True,
+                'domain': domain.name,
+                'snapshot_id': snapshot.id,
+                'content_length': snapshot.content_length,
+                'status_code': snapshot_data['status_code'],
+                'response_time_ms': snapshot_data['response_time_ms'],
+                'url_used': snapshot_data['url_used'],
+                'is_initial': is_initial
+            }
+        else:
+            # Failed to fetch from any URL
+            error_msg = f"Failed to fetch homepage for {domain.name} from any URL"
+            logger.error(error_msg)
+            
+            # Save failed snapshot record
+            snapshot = DomainSnapshot.objects.create(
+                domain=domain,
+                record_log=record_log,
+                html_content='',
+                status_code=0,
+                error_message=error_msg,
+                is_initial_snapshot=is_initial
+            )
+            
+            return {
+                'success': False,
+                'domain': domain.name,
+                'error': error_msg
+            }
+            
+    except Domain.DoesNotExist:
+        error_msg = f"Domain with ID {domain_id} does not exist"
+        logger.error(error_msg)
+        return {
+            'success': False,
+            'error': error_msg
+        }
+        
+    except Exception as e:
+        error_msg = f"Unexpected error capturing snapshot for domain ID {domain_id}: {str(e)}"
+        logger.error(error_msg)
+        
+        # Re-raise for Celery retry mechanism
+        raise
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 180})
+def fetch_ip_whois_info(self, ip_address):
+    """
+    Fetch WHOIS/ASN information for an IP address.
+    
+    Args:
+        ip_address (str): The IP address to look up
+        
+    Returns:
+        dict: Result dictionary with WHOIS information or error
+    """
+    try:
+        logger.info(f"Fetching WHOIS information for IP: {ip_address}")
+        
+        # Check if we already have recent information for this IP
+        try:
+            existing_info = IPWhoisInfo.objects.get(ip_address=ip_address)
+            
+            # Check if the information is recent (less than 24 hours old)
+            from django.utils import timezone
+            if timezone.now() - existing_info.updated_at < timezone.timedelta(hours=24):
+                logger.info(f"Using cached WHOIS info for {ip_address}")
+                return {
+                    'success': True,
+                    'ip_address': ip_address,
+                    'cached': True,
+                    'whois_info': {
+                        'asn': existing_info.asn,
+                        'asn_description': existing_info.asn_description,
+                        'organization': existing_info.organization,
+                        'isp': existing_info.isp,
+                        'country': existing_info.country,
+                        'country_code': existing_info.country_code,
+                        'registry': existing_info.registry,
+                        'network_cidr': existing_info.network_cidr,
+                    }
+                }
+        except IPWhoisInfo.DoesNotExist:
+            pass
+        
+        # Perform WHOIS lookup
+        start_time = time.time()
+        obj = IPWhois(ip_address)
+        
+        try:
+            # Try RDAP first (more modern)
+            result = obj.lookup_rdap(depth=1)
+        except Exception as rdap_error:
+            logger.warning(f"RDAP lookup failed for {ip_address}: {str(rdap_error)}, trying WHOIS")
+            try:
+                # Fallback to traditional WHOIS
+                result = obj.lookup_whois()
+            except Exception as whois_error:
+                logger.error(f"Both RDAP and WHOIS lookups failed for {ip_address}: RDAP={str(rdap_error)}, WHOIS={str(whois_error)}")
+                raise whois_error
+        
+        end_time = time.time()
+        lookup_time = int((end_time - start_time) * 1000)
+        
+        logger.info(f"WHOIS lookup completed for {ip_address} in {lookup_time}ms")
+        
+        # Extract relevant information
+        whois_data = {
+            'asn': None,
+            'asn_description': None,
+            'organization': None,
+            'isp': None,
+            'country': None,
+            'country_code': None,
+            'registry': None,
+            'network_cidr': None,
+        }
+        
+        # Extract ASN information
+        if 'asn' in result and result['asn']:
+            whois_data['asn'] = str(result['asn'])
+        
+        if 'asn_description' in result and result['asn_description']:
+            whois_data['asn_description'] = result['asn_description']
+        
+        # Extract network information
+        if 'nets' in result and result['nets']:
+            net = result['nets'][0]  # Use the first network entry
+            
+            if 'name' in net and net['name']:
+                whois_data['organization'] = net['name']
+            
+            if 'description' in net and net['description']:
+                # Sometimes description contains ISP info
+                if not whois_data['organization'] and net['description']:
+                    whois_data['organization'] = net['description']
+                whois_data['isp'] = net['description']
+            
+            if 'country' in net and net['country']:
+                whois_data['country'] = net['country']
+            
+            if 'cidr' in net and net['cidr']:
+                whois_data['network_cidr'] = net['cidr']
+        
+        # Extract registry information
+        if 'asn_registry' in result and result['asn_registry']:
+            whois_data['registry'] = result['asn_registry']
+        
+        # Extract country code from query if not found in nets
+        if 'asn_country_code' in result and result['asn_country_code']:
+            if not whois_data['country_code']:
+                whois_data['country_code'] = result['asn_country_code']
+        
+        # Clean up the data
+        for key, value in whois_data.items():
+            if isinstance(value, str):
+                whois_data[key] = value.strip()[:255] if value.strip() else None
+        
+        # Create or update the database record
+        ip_whois_info, created = IPWhoisInfo.objects.update_or_create(
+            ip_address=ip_address,
+            defaults=whois_data
+        )
+        
+        action = "Created" if created else "Updated"
+        logger.info(f"{action} WHOIS info for {ip_address} - ASN: {whois_data['asn']}, Org: {whois_data['organization']}")
+        
+        return {
+            'success': True,
+            'ip_address': ip_address,
+            'cached': False,
+            'created': created,
+            'lookup_time_ms': lookup_time,
+            'whois_info': whois_data
+        }
+        
+    except Exception as e:
+        error_msg = f"Failed to fetch WHOIS info for {ip_address}: {str(e)}"
+        logger.error(error_msg)
+        
+        # Save error information
+        IPWhoisInfo.objects.update_or_create(
+            ip_address=ip_address,
+            defaults={
+                'error_message': error_msg,
+                'asn': None,
+                'asn_description': None,
+                'organization': None,
+                'isp': None,
+                'country': None,
+                'country_code': None,
+                'registry': None,
+                'network_cidr': None,
+            }
+        )
+        
+        return {
+            'success': False,
+            'ip_address': ip_address,
+            'error': error_msg
+        }
+
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 2, 'countdown': 60})
+def fetch_record_log_ip_info(self, record_log_id):
+    """
+    Fetch WHOIS information for all IPs in a RecordLog entry.
+    
+    Args:
+        record_log_id (int): The ID of the RecordLog entry
+        
+    Returns:
+        dict: Result dictionary with summary of WHOIS lookups
+    """
+    try:
+        record_log = RecordLog.objects.get(id=record_log_id)
+        logger.info(f"Fetching IP info for record log {record_log_id} - Domain: {record_log.domain.name}")
+        
+        ips = record_log.get_ips_list()
+        if not ips:
+            logger.warning(f"No IPs found in record log {record_log_id}")
+            return {
+                'success': True,
+                'record_log_id': record_log_id,
+                'domain': record_log.domain.name,
+                'ips_processed': 0,
+                'message': 'No IPs to process'
+            }
+        
+        results = []
+        
+        for ip in ips:
+            # Fetch WHOIS info for this IP
+            whois_result = fetch_ip_whois_info(ip)
+            results.append(whois_result)
+            
+            if whois_result['success']:
+                # Get the IPWhoisInfo object
+                ip_whois_info = IPWhoisInfo.objects.get(ip_address=ip)
+                
+                # Create association between RecordLog and IPWhoisInfo
+                record_log_ip_info, created = RecordLogIPInfo.objects.get_or_create(
+                    record_log=record_log,
+                    ip_address=ip,
+                    defaults={'ip_whois_info': ip_whois_info}
+                )
+                
+                if not created:
+                    # Update with latest WHOIS info
+                    record_log_ip_info.ip_whois_info = ip_whois_info
+                    record_log_ip_info.save()
+        
+        successful_lookups = sum(1 for r in results if r['success'])
+        failed_lookups = len(results) - successful_lookups
+        
+        logger.info(f"IP info collection complete for record log {record_log_id}: {successful_lookups} successful, {failed_lookups} failed")
+        
+        return {
+            'success': True,
+            'record_log_id': record_log_id,
+            'domain': record_log.domain.name,
+            'ips_processed': len(ips),
+            'successful_lookups': successful_lookups,
+            'failed_lookups': failed_lookups,
+            'results': results
+        }
+        
+    except RecordLog.DoesNotExist:
+        error_msg = f"RecordLog with ID {record_log_id} does not exist"
+        logger.error(error_msg)
+        return {
+            'success': False,
+            'error': error_msg
+        }
+        
+    except Exception as e:
+        error_msg = f"Unexpected error fetching IP info for record log {record_log_id}: {str(e)}"
+        logger.error(error_msg)
         raise
 
 

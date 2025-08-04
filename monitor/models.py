@@ -125,8 +125,215 @@ class RecordLog(models.Model):
             self.ips = ''
 
 
+class DomainSnapshot(models.Model):
+    """Model to store HTML snapshots of domain homepages."""
+    
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        related_name='snapshots',
+        help_text="Domain that was captured"
+    )
+    record_log = models.OneToOneField(
+        RecordLog,
+        on_delete=models.CASCADE,
+        related_name='snapshot',
+        null=True,
+        blank=True,
+        help_text="Associated DNS check log entry (if snapshot was taken due to IP change)"
+    )
+    html_content = models.TextField(
+        help_text="Raw HTML content of the homepage (without CSS/JS)"
+    )
+    status_code = models.PositiveIntegerField(
+        help_text="HTTP status code from the request"
+    )
+    response_time_ms = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Response time in milliseconds"
+    )
+    error_message = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Error message if snapshot capture failed"
+    )
+    is_initial_snapshot = models.BooleanField(
+        default=False,
+        help_text="Whether this is the initial snapshot when domain was first added"
+    )
+    timestamp = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this snapshot was captured"
+    )
+
+    class Meta:
+        ordering = ['-timestamp']
+        verbose_name = 'Domain Snapshot'
+        verbose_name_plural = 'Domain Snapshots'
+        indexes = [
+            models.Index(fields=['domain', '-timestamp']),
+            models.Index(fields=['is_initial_snapshot', '-timestamp']),
+        ]
+
+    def __str__(self):
+        snapshot_type = "Initial" if self.is_initial_snapshot else "Change"
+        return f"{self.domain.name} - {snapshot_type} Snapshot - {self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
+
+    @property
+    def content_length(self):
+        """Return the length of HTML content for display purposes."""
+        return len(self.html_content) if self.html_content else 0
+
+    @property
+    def content_preview(self):
+        """Return a truncated preview of the HTML content."""
+        if not self.html_content:
+            return ""
+        preview = self.html_content[:200]
+        if len(self.html_content) > 200:
+            preview += "..."
+        return preview
+
+
+class IPWhoisInfo(models.Model):
+    """Model to store ISP/ASN information for IP addresses."""
+    
+    ip_address = models.GenericIPAddressField(
+        unique=True,
+        help_text="IP address this information belongs to"
+    )
+    asn = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="Autonomous System Number (e.g., AS13335)"
+    )
+    asn_description = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Description of the ASN"
+    )
+    organization = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Organization name"
+    )
+    isp = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Internet Service Provider"
+    )
+    country = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="Country where IP is registered"
+    )
+    country_code = models.CharField(
+        max_length=2,
+        null=True,
+        blank=True,
+        help_text="Two-letter country code"
+    )
+    registry = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="Regional Internet Registry (e.g., ARIN, RIPE)"
+    )
+    network_cidr = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="Network CIDR block"
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        help_text="Last time this information was updated"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this information was first retrieved"
+    )
+    error_message = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Error message if WHOIS lookup failed"
+    )
+
+    class Meta:
+        ordering = ['-updated_at']
+        verbose_name = 'IP WHOIS Information'
+        verbose_name_plural = 'IP WHOIS Information'
+        indexes = [
+            models.Index(fields=['ip_address']),
+            models.Index(fields=['asn']),
+            models.Index(fields=['organization']),
+        ]
+
+    def __str__(self):
+        if self.organization:
+            return f"{self.ip_address} - {self.organization}"
+        elif self.asn:
+            return f"{self.ip_address} - {self.asn}"
+        else:
+            return str(self.ip_address)
+
+    @property
+    def display_info(self):
+        """Return a formatted display of the WHOIS information."""
+        parts = []
+        if self.organization:
+            parts.append(self.organization)
+        if self.asn:
+            parts.append(f"AS{self.asn.replace('AS', '')}")
+        if self.country:
+            parts.append(self.country)
+        return " | ".join(parts) if parts else "Unknown"
+
+
+class RecordLogIPInfo(models.Model):
+    """Model to link RecordLog entries with IP WHOIS information."""
+    
+    record_log = models.ForeignKey(
+        RecordLog,
+        on_delete=models.CASCADE,
+        related_name='ip_info_entries',
+        help_text="DNS record log this IP information belongs to"
+    )
+    ip_whois_info = models.ForeignKey(
+        IPWhoisInfo,
+        on_delete=models.CASCADE,
+        related_name='record_log_entries',
+        help_text="WHOIS information for the IP"
+    )
+    ip_address = models.GenericIPAddressField(
+        help_text="IP address (denormalized for easier querying)"
+    )
+    timestamp = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this association was created"
+    )
+
+    class Meta:
+        ordering = ['-timestamp']
+        verbose_name = 'Record Log IP Information'
+        verbose_name_plural = 'Record Log IP Information'
+        unique_together = ['record_log', 'ip_address']
+        indexes = [
+            models.Index(fields=['record_log', 'ip_address']),
+        ]
+
+    def __str__(self):
+        return f"{self.record_log.domain.name} - {self.ip_address} - {self.ip_whois_info.display_info}"
+
+
 class APIKey(models.Model):
     """
+```
     API Key model for API authentication
     """
     name = models.CharField(max_length=100, help_text="Human-readable name for this API key")
