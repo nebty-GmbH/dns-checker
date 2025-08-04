@@ -19,13 +19,24 @@ def check_domain_a_records(self, domain_id):
         dict: Result dictionary with success status and details
     """
     try:
+        # Import here to avoid circular imports
+        from .models import MonitorSettings
+        
+        # Get current settings for timeout
+        settings = MonitorSettings.get_settings()
+        
         # Fetch the domain from database
         domain = Domain.objects.get(id=domain_id)
         logger.info(f"Checking DNS A records for domain: {domain.name}")
         
+        # Configure DNS resolver with timeout from settings
+        resolver = dns.resolver.Resolver()
+        resolver.timeout = settings.dns_timeout_seconds
+        resolver.lifetime = settings.dns_timeout_seconds * 2
+        
         # Perform DNS lookup
         try:
-            answers = dns.resolver.resolve(domain.name, 'A')
+            answers = resolver.resolve(domain.name, 'A')
             current_ips = [str(answer) for answer in answers]
             logger.info(f"Found IPs for {domain.name}: {current_ips}")
             
@@ -51,6 +62,10 @@ def check_domain_a_records(self, domain_id):
             
             if is_change:
                 logger.info(f"DNS change detected for {domain.name}: {previous_ips_string} -> {current_ips_string}")
+                
+                # Send notification if enabled
+                if settings.email_notifications_enabled and settings.notification_email:
+                    send_change_notification.delay(domain.id, record_log.id)
             else:
                 logger.info(f"No DNS change for {domain.name}: {current_ips_string}")
             
@@ -153,17 +168,23 @@ def check_domain_a_records(self, domain_id):
 def schedule_domain_checks():
     """
     Scheduler task that dispatches individual domain check tasks for all active domains.
-    This task is called by Celery Beat every 15 minutes.
+    This task uses the configurable interval from MonitorSettings.
     
     Returns:
         dict: Summary of scheduled tasks
     """
+    from .models import MonitorSettings
+    
     active_domains = Domain.objects.filter(is_active=True)
+    settings = MonitorSettings.get_settings()
     scheduled_count = 0
     
-    logger.info(f"Scheduling DNS checks for {active_domains.count()} active domains")
+    logger.info(f"Scheduling DNS checks for {active_domains.count()} active domains (interval: {settings.check_interval_minutes} minutes)")
     
-    for domain in active_domains:
+    # Limit parallel checks based on settings
+    domains_to_check = active_domains[:settings.max_parallel_checks]
+    
+    for domain in domains_to_check:
         try:
             # Dispatch individual check task
             check_domain_a_records.delay(domain.id)
@@ -172,14 +193,72 @@ def schedule_domain_checks():
         except Exception as e:
             logger.error(f"Failed to schedule check for domain {domain.name}: {str(e)}")
     
+    if active_domains.count() > settings.max_parallel_checks:
+        logger.warning(f"Limited to {settings.max_parallel_checks} parallel checks. {active_domains.count() - settings.max_parallel_checks} domains will be checked in the next cycle.")
+    
     logger.info(f"Successfully scheduled {scheduled_count} domain checks")
     
     return {
         'success': True,
         'total_active_domains': active_domains.count(),
         'scheduled_tasks': scheduled_count,
+        'max_parallel_checks': settings.max_parallel_checks,
+        'check_interval_minutes': settings.check_interval_minutes,
         'timestamp': timezone.now().isoformat()
     }
+
+
+@shared_task
+def send_change_notification(domain_id, record_log_id):
+    """
+    Send email notification when DNS change is detected.
+    
+    Args:
+        domain_id (int): The ID of the Domain that changed
+        record_log_id (int): The ID of the RecordLog entry
+    """
+    try:
+        from django.core.mail import send_mail
+        from django.conf import settings as django_settings
+        from .models import MonitorSettings
+        
+        domain = Domain.objects.get(id=domain_id)
+        record_log = RecordLog.objects.get(id=record_log_id)
+        monitor_settings = MonitorSettings.get_settings()
+        
+        if not monitor_settings.email_notifications_enabled or not monitor_settings.notification_email:
+            logger.info(f"Email notifications disabled, skipping notification for {domain.name}")
+            return
+        
+        subject = f"DNS Change Alert: {domain.name}"
+        
+        previous_ips = domain.get_last_known_ips_list()
+        current_ips = record_log.get_ips_list()
+        
+        message = f"""
+DNS A-record change detected for domain: {domain.name}
+
+Previous IPs: {', '.join(previous_ips) if previous_ips else 'None'}
+Current IPs:  {', '.join(current_ips)}
+
+Change detected at: {record_log.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}
+
+This is an automated notification from your DNS monitoring system.
+"""
+        
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=getattr(django_settings, 'DEFAULT_FROM_EMAIL', 'noreply@example.com'),
+            recipient_list=[monitor_settings.notification_email],
+            fail_silently=False,
+        )
+        
+        logger.info(f"Email notification sent for DNS change in {domain.name}")
+        
+    except Exception as e:
+        logger.error(f"Failed to send email notification for domain {domain_id}: {str(e)}")
+        raise
 
 
 @shared_task

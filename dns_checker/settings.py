@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'django_celery_beat',
     'monitor',
 ]
 
@@ -107,11 +108,14 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 
-# Celery Beat Schedule
+# Celery Beat Schedule - Use database scheduler for dynamic configuration
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+# Default schedule (will be overridden by database settings)
 CELERY_BEAT_SCHEDULE = {
     'check-all-domains': {
         'task': 'monitor.tasks.schedule_domain_checks',
-        'schedule': crontab(minute='*/15'),  # Every 15 minutes
+        'schedule': crontab(minute='*/15'),  # Fallback: Every 15 minutes
     },
 }
 

@@ -22,6 +22,8 @@ Authorization: ApiKey your_api_key_here
 
 ## API Endpoints
 
+Base URL: https://dns-checker.116.203.84.42.sslip.io
+
 ### 1. Add New Domain
 
 **Endpoint:** `POST /api/domains/`

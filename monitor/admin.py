@@ -3,7 +3,7 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils import timezone
-from .models import Domain, RecordLog, APIKey
+from .models import Domain, RecordLog, APIKey, MonitorSettings
 
 
 @admin.register(Domain)
@@ -198,6 +198,64 @@ class APIKeyAdmin(admin.ModelAdmin):
         if not change:  # Creating new API key
             obj.user = obj.user or request.user
         super().save_model(request, obj, form, change)
+
+
+@admin.register(MonitorSettings)
+class MonitorSettingsAdmin(admin.ModelAdmin):
+    """Admin configuration for Monitor Settings."""
+    
+    list_display = ['check_interval_display', 'email_notifications_enabled', 'notification_email', 'updated_at']
+    
+    fieldsets = (
+        ('DNS Check Settings', {
+            'fields': ('check_interval_minutes', 'max_parallel_checks', 'dns_timeout_seconds'),
+            'description': 'Configure how often and how DNS checks are performed.'
+        }),
+        ('Notification Settings', {
+            'fields': ('email_notifications_enabled', 'notification_email'),
+            'description': 'Configure email notifications for DNS changes.'
+        }),
+        ('System Information', {
+            'fields': ('updated_at',),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    readonly_fields = ['updated_at']
+    
+    def check_interval_display(self, obj):
+        """Display check interval with units"""
+        if obj.check_interval_minutes == 1:
+            return "1 minute"
+        elif obj.check_interval_minutes < 60:
+            return f"{obj.check_interval_minutes} minutes"
+        elif obj.check_interval_minutes == 60:
+            return "1 hour"
+        else:
+            hours = obj.check_interval_minutes // 60
+            minutes = obj.check_interval_minutes % 60
+            if minutes == 0:
+                return f"{hours} hours"
+            else:
+                return f"{hours}h {minutes}m"
+    check_interval_display.short_description = 'Check Interval'
+    
+    def has_add_permission(self, request):
+        """Only allow one settings instance"""
+        return not MonitorSettings.objects.exists()
+    
+    def has_delete_permission(self, request, obj=None):
+        """Don't allow deletion of settings"""
+        return False
+    
+    def save_model(self, request, obj, form, change):
+        """Save with custom message"""
+        super().save_model(request, obj, form, change)
+        self.message_user(
+            request, 
+            f"Settings updated successfully. DNS checks will now run every {obj.check_interval_minutes} minutes.",
+            level='SUCCESS'
+        )
 
 
 # Customize admin site headers

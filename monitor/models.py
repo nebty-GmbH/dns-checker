@@ -145,3 +145,97 @@ class APIKey(models.Model):
         if len(self.key) >= 8:
             return f"{self.key[:4]}...{self.key[-4:]}"
         return "****"
+
+
+class MonitorSettings(models.Model):
+    """
+    Global settings for the DNS monitoring system
+    """
+    # Singleton pattern - only one instance should exist
+    check_interval_minutes = models.PositiveIntegerField(
+        default=15,
+        help_text="How often to check domains for DNS changes (in minutes). Minimum: 1 minute."
+    )
+    email_notifications_enabled = models.BooleanField(
+        default=False,
+        help_text="Whether to send email notifications when DNS changes are detected"
+    )
+    notification_email = models.EmailField(
+        blank=True,
+        null=True,
+        help_text="Email address to send notifications to"
+    )
+    max_parallel_checks = models.PositiveIntegerField(
+        default=10,
+        help_text="Maximum number of domains to check in parallel"
+    )
+    dns_timeout_seconds = models.PositiveIntegerField(
+        default=30,
+        help_text="Timeout for DNS queries in seconds"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Monitor Settings"
+        verbose_name_plural = "Monitor Settings"
+    
+    def __str__(self):
+        return f"DNS Monitor Settings (Check every {self.check_interval_minutes} minutes)"
+    
+    def save(self, *args, **kwargs):
+        # Ensure minimum check interval
+        if self.check_interval_minutes < 1:
+            self.check_interval_minutes = 1
+        
+        # Singleton pattern - delete other instances
+        if not self.pk:
+            MonitorSettings.objects.all().delete()
+        
+        super().save(*args, **kwargs)
+        
+        # Update Celery Beat schedule when settings change
+        self._update_celery_schedule()
+    
+    def _update_celery_schedule(self):
+        """Update the Celery Beat schedule with new interval"""
+        try:
+            from django_celery_beat.models import PeriodicTask, IntervalSchedule
+            
+            # Get or create interval schedule
+            schedule, created = IntervalSchedule.objects.get_or_create(
+                every=self.check_interval_minutes,
+                period=IntervalSchedule.MINUTES,
+            )
+            
+            # Update or create the periodic task
+            task, created = PeriodicTask.objects.get_or_create(
+                name='DNS Domain Checks',
+                defaults={
+                    'task': 'monitor.tasks.schedule_domain_checks',
+                    'interval': schedule,
+                    'enabled': True,
+                }
+            )
+            
+            if not created:
+                # Update existing task
+                task.interval = schedule
+                task.enabled = True
+                task.save()
+                
+        except ImportError:
+            # django-celery-beat not installed, use settings-based schedule
+            pass
+    
+    @classmethod
+    def get_settings(cls):
+        """Get the current settings instance, creating default if none exists"""
+        settings, created = cls.objects.get_or_create(
+            defaults={
+                'check_interval_minutes': 15,
+                'email_notifications_enabled': False,
+                'max_parallel_checks': 10,
+                'dns_timeout_seconds': 30,
+            }
+        )
+        return settings
