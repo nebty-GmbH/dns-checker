@@ -52,6 +52,20 @@ class Domain(models.Model):
             self.last_known_ips = ','.join(sorted_ips)
         else:
             self.last_known_ips = ''
+    
+    def can_be_checked_now(self):
+        """Check if domain can be checked now based on rate limiting."""
+        from monitor.models import MonitorSettings
+        settings = MonitorSettings.get_settings()
+        
+        if not self.updated_at:
+            return True
+        
+        from django.utils import timezone
+        time_since_check = timezone.now() - self.updated_at
+        min_interval = timezone.timedelta(seconds=settings.min_check_interval_seconds)
+        
+        return time_since_check >= min_interval
 
 
 class RecordLog(models.Model):
@@ -152,10 +166,24 @@ class MonitorSettings(models.Model):
     Global settings for the DNS monitoring system
     """
     # Singleton pattern - only one instance should exist
+    
+    # Periodic monitoring settings (for scheduled checks)
     check_interval_minutes = models.PositiveIntegerField(
         default=15,
         help_text="How often to check domains for DNS changes (in minutes). Minimum: 1 minute."
     )
+    
+    # Continuous monitoring settings
+    continuous_monitoring_enabled = models.BooleanField(
+        default=True,
+        help_text="Enable continuous monitoring (starts new cycle immediately after completion)"
+    )
+    min_check_interval_seconds = models.PositiveIntegerField(
+        default=60,
+        help_text="Minimum seconds between checks for the same domain (rate limiting). Minimum: 10 seconds"
+    )
+    
+    # Notification settings
     email_notifications_enabled = models.BooleanField(
         default=False,
         help_text="Whether to send email notifications when DNS changes are detected"
@@ -165,6 +193,8 @@ class MonitorSettings(models.Model):
         null=True,
         help_text="Email address to send notifications to"
     )
+    
+    # Performance settings
     max_parallel_checks = models.PositiveIntegerField(
         default=10,
         help_text="Maximum number of domains to check in parallel"
@@ -180,12 +210,19 @@ class MonitorSettings(models.Model):
         verbose_name_plural = "Monitor Settings"
     
     def __str__(self):
-        return f"DNS Monitor Settings (Check every {self.check_interval_minutes} minutes)"
+        if self.continuous_monitoring_enabled:
+            return f"DNS Monitor Settings (Continuous monitoring with {self.min_check_interval_seconds}s rate limit)"
+        else:
+            return f"DNS Monitor Settings (Check every {self.check_interval_minutes} minutes)"
     
     def save(self, *args, **kwargs):
         # Ensure minimum check interval
         if self.check_interval_minutes < 1:
             self.check_interval_minutes = 1
+        
+        # Ensure minimum rate limiting interval
+        if self.min_check_interval_seconds < 10:
+            self.min_check_interval_seconds = 10
         
         # Singleton pattern - delete other instances
         if not self.pk:
@@ -195,6 +232,9 @@ class MonitorSettings(models.Model):
         
         # Update Celery Beat schedule when settings change
         self._update_celery_schedule()
+        
+        # Start or stop continuous monitoring based on settings
+        self._manage_continuous_monitoring()
     
     def _update_celery_schedule(self):
         """Update the Celery Beat schedule with new interval"""
@@ -227,12 +267,23 @@ class MonitorSettings(models.Model):
             # django-celery-beat not installed, use settings-based schedule
             pass
     
+    def _manage_continuous_monitoring(self):
+        """Start or stop continuous monitoring based on settings"""
+        if self.continuous_monitoring_enabled:
+            # Start continuous monitoring task
+            from monitor.tasks import start_continuous_monitoring
+            start_continuous_monitoring.delay()
+        # Note: Stopping continuous monitoring is handled by the task itself
+        # when it checks the settings at the beginning of each cycle
+    
     @classmethod
     def get_settings(cls):
         """Get the current settings instance, creating default if none exists"""
         settings, created = cls.objects.get_or_create(
             defaults={
                 'check_interval_minutes': 15,
+                'continuous_monitoring_enabled': True,
+                'min_check_interval_seconds': 60,
                 'email_notifications_enabled': False,
                 'max_parallel_checks': 10,
                 'dns_timeout_seconds': 30,

@@ -204,12 +204,26 @@ class APIKeyAdmin(admin.ModelAdmin):
 class MonitorSettingsAdmin(admin.ModelAdmin):
     """Admin configuration for Monitor Settings."""
     
-    list_display = ['check_interval_display', 'email_notifications_enabled', 'notification_email', 'updated_at']
+    list_display = ['monitoring_mode_display', 'check_interval_display', 'rate_limit_display', 'email_notifications_enabled', 'updated_at']
     
     fieldsets = (
-        ('DNS Check Settings', {
-            'fields': ('check_interval_minutes', 'max_parallel_checks', 'dns_timeout_seconds'),
-            'description': 'Configure how often and how DNS checks are performed.'
+        ('Monitoring Mode', {
+            'fields': ('continuous_monitoring_enabled',),
+            'description': 'Choose between periodic scheduled checks or continuous monitoring.'
+        }),
+        ('Periodic Monitoring Settings', {
+            'fields': ('check_interval_minutes',),
+            'description': 'Configure scheduled DNS checks (only used when continuous monitoring is disabled).',
+            'classes': ('collapse',)
+        }),
+        ('Continuous Monitoring Settings', {
+            'fields': ('min_check_interval_seconds',),
+            'description': 'Configure rate limiting for continuous monitoring (only used when continuous monitoring is enabled).',
+            'classes': ('collapse',)
+        }),
+        ('Performance Settings', {
+            'fields': ('max_parallel_checks', 'dns_timeout_seconds'),
+            'description': 'Configure system performance and DNS timeout settings.'
         }),
         ('Notification Settings', {
             'fields': ('email_notifications_enabled', 'notification_email'),
@@ -223,8 +237,19 @@ class MonitorSettingsAdmin(admin.ModelAdmin):
     
     readonly_fields = ['updated_at']
     
+    def monitoring_mode_display(self, obj):
+        """Display the current monitoring mode"""
+        if obj.continuous_monitoring_enabled:
+            return format_html('<span style="color: green;">Continuous</span>')
+        else:
+            return format_html('<span style="color: blue;">Periodic</span>')
+    monitoring_mode_display.short_description = 'Mode'
+    
     def check_interval_display(self, obj):
         """Display check interval with units"""
+        if obj.continuous_monitoring_enabled:
+            return "N/A (Continuous)"
+        
         if obj.check_interval_minutes == 1:
             return "1 minute"
         elif obj.check_interval_minutes < 60:
@@ -238,7 +263,33 @@ class MonitorSettingsAdmin(admin.ModelAdmin):
                 return f"{hours} hours"
             else:
                 return f"{hours}h {minutes}m"
-    check_interval_display.short_description = 'Check Interval'
+    check_interval_display.short_description = 'Periodic Interval'
+    
+    def rate_limit_display(self, obj):
+        """Display rate limiting with units"""
+        if not obj.continuous_monitoring_enabled:
+            return "N/A (Periodic)"
+        
+        if obj.min_check_interval_seconds < 60:
+            return f"{obj.min_check_interval_seconds}s"
+        elif obj.min_check_interval_seconds == 60:
+            return "1 min"
+        elif obj.min_check_interval_seconds < 3600:
+            minutes = obj.min_check_interval_seconds // 60
+            seconds = obj.min_check_interval_seconds % 60
+            if seconds == 0:
+                return f"{minutes} min"
+            else:
+                return f"{minutes}m {seconds}s"
+        else:
+            hours = obj.min_check_interval_seconds // 3600
+            remainder = obj.min_check_interval_seconds % 3600
+            minutes = remainder // 60
+            if minutes == 0:
+                return f"{hours}h"
+            else:
+                return f"{hours}h {minutes}m"
+    rate_limit_display.short_description = 'Rate Limit'
     
     def has_add_permission(self, request):
         """Only allow one settings instance"""
@@ -251,11 +302,13 @@ class MonitorSettingsAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         """Save with custom message"""
         super().save_model(request, obj, form, change)
-        self.message_user(
-            request, 
-            f"Settings updated successfully. DNS checks will now run every {obj.check_interval_minutes} minutes.",
-            level='SUCCESS'
-        )
+        
+        if obj.continuous_monitoring_enabled:
+            message = f"Settings updated successfully. Continuous monitoring enabled with {obj.min_check_interval_seconds}s rate limiting."
+        else:
+            message = f"Settings updated successfully. Periodic DNS checks will run every {obj.check_interval_minutes} minutes."
+        
+        self.message_user(request, message, level='SUCCESS')
 
 
 # Customize admin site headers

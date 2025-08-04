@@ -1,0 +1,84 @@
+{
+  "name": "DNS Checker",
+  "description": "A Django application for monitoring DNS A-record changes with configurable periodic or continuous monitoring",
+  "keywords": [
+    "dns",
+    "monitoring",
+    "django",
+    "celery",
+    "postgresql",
+    "redis"
+  ],
+  "website": "https://github.com/nebty-GmbH/dns-checker",
+  "repository": "https://github.com/nebty-GmbH/dns-checker",
+  "success_url": "/admin/",
+  "scripts": {
+    "dokku": {
+      "postdeploy": "python manage.py migrate && python manage.py collectstatic --noinput && python manage.py init_monitor"
+    }
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "basic"
+    },
+    "worker": {
+      "quantity": 1,
+      "size": "basic"
+    },
+    "beat": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "addons": [
+    "dokku-postgres",
+    "dokku-redis"
+  ],
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ],
+  "environments": {
+    "production": {
+      "scripts": {
+        "postdeploy": "python manage.py migrate && python manage.py collectstatic --noinput && python manage.py init_monitor"
+      }
+    },
+    "staging": {
+      "scripts": {
+        "postdeploy": "python manage.py migrate && python manage.py collectstatic --noinput && python manage.py init_monitor"
+      }
+    }
+  },
+  "healthchecks": {
+    "web": [
+      {
+        "type": "startup",
+        "name": "web-startup",
+        "path": "/admin/login/",
+        "timeout": 30,
+        "attempts": 5
+      }
+    ]
+  },
+  "env": {
+    "DJANGO_SETTINGS_MODULE": {
+      "description": "Django settings module to use",
+      "value": "dns_checker.settings"
+    },
+    "SECRET_KEY": {
+      "description": "Django secret key for cryptographic signing",
+      "generator": "secret"
+    },
+    "DEBUG": {
+      "description": "Enable Django debug mode (should be False in production)",
+      "value": "False"
+    },
+    "ALLOWED_HOSTS": {
+      "description": "Comma-separated list of allowed hosts",
+      "value": "*"
+    }
+  }
+}

@@ -302,3 +302,118 @@ def check_all_domains_now():
         'results': results,
         'timestamp': timezone.now().isoformat()
     }
+
+
+@shared_task(bind=True)
+def start_continuous_monitoring(self):
+    """
+    Start continuous monitoring loop.
+    This task continuously checks domains with rate limiting.
+    """
+    try:
+        from .models import MonitorSettings
+        
+        settings = MonitorSettings.get_settings()
+        
+        # Check if continuous monitoring is still enabled
+        if not settings.continuous_monitoring_enabled:
+            logger.info("Continuous monitoring is disabled, stopping task")
+            return {'message': 'Continuous monitoring disabled'}
+        
+        logger.info("Starting continuous monitoring cycle")
+        
+        # Get domains that can be checked now (respecting rate limits)
+        domains_to_check = Domain.objects.filter(is_active=True).all()
+        
+        checkable_domains = [
+            domain for domain in domains_to_check 
+            if domain.can_be_checked_now()
+        ]
+        
+        logger.info(f"Found {len(checkable_domains)} domains ready for checking out of {len(domains_to_check)} total active domains")
+        
+        if checkable_domains:
+            # Check domains in parallel respecting max_parallel_checks
+            batch_size = min(settings.max_parallel_checks, len(checkable_domains))
+            batches = [checkable_domains[i:i + batch_size] for i in range(0, len(checkable_domains), batch_size)]
+            
+            for batch in batches:
+                # Process each domain in the batch
+                for domain in batch:
+                    check_domain_a_records.delay(domain.id)
+                logger.info(f"Queued batch of {len(batch)} domains")
+        
+        # Check if continuous monitoring is still enabled before scheduling next cycle
+        settings.refresh_from_db()
+        if settings.continuous_monitoring_enabled:
+            # Schedule the next cycle immediately
+            logger.info("Scheduling next continuous monitoring cycle")
+            start_continuous_monitoring.apply_async(countdown=5)  # Small delay to avoid overwhelming
+        else:
+            logger.info("Continuous monitoring disabled, not scheduling next cycle")
+        
+        return {
+            'message': 'Continuous monitoring cycle completed',
+            'domains_checked': len(checkable_domains),
+            'total_active_domains': len(domains_to_check),
+            'timestamp': timezone.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in continuous monitoring: {str(e)}")
+        # Re-raise to trigger Celery retry if needed
+        raise
+
+
+@shared_task(bind=True)
+def check_domains_with_rate_limiting(self):
+    """
+    Check all domains that are ready to be checked based on rate limiting.
+    This is similar to continuous monitoring but designed for one-off execution.
+    """
+    try:
+        from .models import MonitorSettings
+        
+        settings = MonitorSettings.get_settings()
+        
+        # Get domains that can be checked now (respecting rate limits)
+        domains_to_check = Domain.objects.filter(is_active=True).all()
+        
+        checkable_domains = [
+            domain for domain in domains_to_check 
+            if domain.can_be_checked_now()
+        ]
+        
+        logger.info(f"Rate-limited check: {len(checkable_domains)} domains ready for checking out of {len(domains_to_check)} total active domains")
+        
+        if not checkable_domains:
+            return {
+                'message': 'No domains ready for checking due to rate limiting',
+                'total_active_domains': len(domains_to_check),
+                'timestamp': timezone.now().isoformat()
+            }
+        
+        # Check domains in parallel respecting max_parallel_checks
+        batch_size = min(settings.max_parallel_checks, len(checkable_domains))
+        batches = [checkable_domains[i:i + batch_size] for i in range(0, len(checkable_domains), batch_size)]
+        
+        checked_count = 0
+        for batch in batches:
+            # Process each domain in the batch
+            for domain in batch:
+                check_domain_a_records.delay(domain.id)
+                checked_count += 1
+            logger.info(f"Queued batch of {len(batch)} domains")
+        
+        logger.info(f"Rate-limited check complete: queued {checked_count} domain checks")
+        
+        return {
+            'total_domains_checked': checked_count,
+            'total_active_domains': len(domains_to_check),
+            'message': f'Queued {checked_count} domain checks',
+            'timestamp': timezone.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in rate-limited domain check: {str(e)}")
+        raise

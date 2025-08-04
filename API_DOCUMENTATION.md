@@ -226,6 +226,7 @@ Currently, there are no rate limits implemented, but it's recommended to:
 
 - Domain names are stored and compared in lowercase
 - When adding a new domain, an immediate DNS check is triggered
-- The system automatically checks all active domains every 15 minutes
+- The system runs continuous monitoring by default with configurable rate limiting (60 seconds between checks for the same domain)
+- Alternatively, periodic monitoring can be enabled to check all domains at fixed intervals (default: every 15 minutes)
 - IP addresses are automatically sorted for consistent comparison
 - API keys track last usage timestamp for security monitoring
