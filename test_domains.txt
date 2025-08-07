@@ -1,5 +1,0 @@
-example.com
-google.com
-example.com
-EXAMPLE.COM
-test-domain.org
