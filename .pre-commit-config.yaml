@@ -1,0 +1,90 @@
+# pre-commit run --all-files
+# To auto-fix and re-run: pre-commit run --all-files --fix
+default_stages: [pre-commit]
+fail_fast: false
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+    -   id: check-ast
+    -   id: check-byte-order-marker
+    -   id: check-case-conflict
+    -   id: check-docstring-first
+    -   id: check-yaml
+    -   id: check-json
+    -   id: debug-statements
+    -   id: end-of-file-fixer
+        exclude: "staticfiles/.*|dns_checker.log"
+    -   id: trailing-whitespace
+        exclude: "staticfiles/.*|\\.pyc$"
+    -   id: mixed-line-ending
+        args: ['--fix=lf']
+    -   id: check-added-large-files
+        args: ['--maxkb=1000']
+    -   id: check-merge-conflict
+    -   id: check-executables-have-shebangs
+
+-   repo: https://github.com/psf/black
+    rev: 24.8.0
+    hooks:
+    -   id: black
+        args: [--target-version, py311]
+        exclude: "migrations/.*"
+
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.6
+    hooks:
+    -   id: ruff
+        args: ['--fix', '--ignore', 'E722,E501', '--select', 'I,E,W,F']
+        exclude: "migrations/.*"
+
+-   repo: https://github.com/asottile/pyupgrade
+    rev: v3.17.0
+    hooks:
+    -   id: pyupgrade
+        args: [--py311-plus]
+        exclude: "migrations/.*"
+
+-   repo: https://github.com/pycqa/flake8
+    rev: 7.1.0
+    hooks:
+    -   id: flake8
+        args: ["--max-line-length=120", "--extend-ignore=E203,W503,E501"]
+        exclude: "migrations/.*"
+
+-   repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+    -   id: isort
+        args: ["--profile", "black", "--skip-glob", "*/migrations/*"]
+
+-   repo: https://github.com/adamchainz/django-upgrade
+    rev: 1.21.0
+    hooks:
+    -   id: django-upgrade
+        args: [--target-version, "4.2"]
+        exclude: "migrations/.*"
+
+-   repo: local
+    hooks:
+    -   id: django-check
+        name: Django Check
+        entry: python manage.py check
+        language: system
+        pass_filenames: false
+        files: \.(py)$
+        exclude: "migrations/.*"
+
+    -   id: django-check-migrations
+        name: Django Check Migrations
+        entry: python manage.py makemigrations --check --dry-run
+        language: system
+        pass_filenames: false
+        files: models\.py$
+
+    -   id: requirements-check
+        name: Requirements Check
+        entry: python -m pip check
+        language: system
+        pass_filenames: false
+        files: requirements\.txt$

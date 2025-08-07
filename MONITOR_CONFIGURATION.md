@@ -84,7 +84,7 @@ When enabled, the system sends email notifications for DNS changes with:
 
 - Domain name that changed
 - Previous IP addresses
-- New IP addresses  
+- New IP addresses
 - Timestamp of change detection
 
 ### Email Configuration
@@ -138,7 +138,7 @@ Check application logs for:
 ### Check Frequency
 
 - **High-priority domains**: 5-15 minutes
-- **Standard monitoring**: 15-30 minutes  
+- **Standard monitoring**: 15-30 minutes
 - **Low-priority domains**: 60+ minutes
 
 ### Parallel Checks

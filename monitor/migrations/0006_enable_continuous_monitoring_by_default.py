@@ -6,7 +6,7 @@ from django.db import migrations
 def enable_continuous_monitoring(apps, schema_editor):
     """Enable continuous monitoring for existing MonitorSettings instances"""
     MonitorSettings = apps.get_model('monitor', 'MonitorSettings')
-    
+
     # Update all existing settings to enable continuous monitoring
     MonitorSettings.objects.filter(continuous_monitoring_enabled=False).update(
         continuous_monitoring_enabled=True
@@ -16,7 +16,7 @@ def enable_continuous_monitoring(apps, schema_editor):
 def disable_continuous_monitoring(apps, schema_editor):
     """Reverse migration: disable continuous monitoring"""
     MonitorSettings = apps.get_model('monitor', 'MonitorSettings')
-    
+
     # Update all settings to disable continuous monitoring
     MonitorSettings.objects.filter(continuous_monitoring_enabled=True).update(
         continuous_monitoring_enabled=False

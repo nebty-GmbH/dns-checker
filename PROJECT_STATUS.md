@@ -89,7 +89,7 @@ dns_checker/
 
 # Start services (3 separate terminals)
 ./run.sh worker    # Terminal 1
-./run.sh beat      # Terminal 2  
+./run.sh beat      # Terminal 2
 ./run.sh server    # Terminal 3
 
 # Access admin
@@ -107,7 +107,7 @@ open http://localhost:8000/admin/
 ### 🔧 Dependencies Installed
 
 - Django 5.2.4
-- Celery 5.5.3  
+- Celery 5.5.3
 - Redis 6.2.0
 - dnspython 2.7.0
 - psycopg2-binary 2.9.10

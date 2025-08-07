@@ -48,13 +48,13 @@ test_static_files() {
 # Function to test Celery configuration
 test_celery() {
     echo "🔄 Testing Celery configuration..."
-    
+
     # Test Celery can import tasks
     python -c "
 from monitor.tasks import check_domain_a_records, schedule_domain_checks
 print('✅ Celery tasks imported successfully')
 "
-    
+
     # Test Redis connection
     python -c "
 import redis

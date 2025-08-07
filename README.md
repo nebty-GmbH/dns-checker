@@ -50,10 +50,10 @@ A Django web application that automatically monitors DNS A-record changes for a 
    ```bash
    # Terminal 1 - Celery Worker
    ./run.sh worker
-   
-   # Terminal 2 - Celery Beat Scheduler  
+
+   # Terminal 2 - Celery Beat Scheduler
    ./run.sh beat
-   
+
    # Terminal 3 - Django Server
    ./run.sh server
    ```
@@ -118,7 +118,7 @@ python manage.py import_domains sample_domains.txt
 dokku apps:create dns-checker
 dokku postgres:create dns-checker-db
 dokku postgres:link dns-checker-db dns-checker
-dokku redis:create dns-checker-redis  
+dokku redis:create dns-checker-redis
 dokku redis:link dns-checker-redis dns-checker
 
 # Configure environment

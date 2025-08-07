@@ -1,16 +1,17 @@
 from django.core.management.base import BaseCommand
+
 from monitor.models import MonitorSettings
 
 
 class Command(BaseCommand):
-    help = 'Initialize default monitor settings and periodic tasks'
+    help = "Initialize default monitor settings and periodic tasks"
 
     def handle(self, *args, **options):
         self.stdout.write("Initializing DNS monitor settings...")
-        
+
         # Create default settings if they don't exist
         settings = MonitorSettings.get_settings()
-        
+
         self.stdout.write(
             self.style.SUCCESS(
                 f"Monitor settings initialized successfully!\n"
@@ -22,16 +23,15 @@ class Command(BaseCommand):
                 f"DNS timeout: {settings.dns_timeout_seconds} seconds"
             )
         )
-        
+
         # Start continuous monitoring if enabled
         if settings.continuous_monitoring_enabled:
             try:
                 from monitor.tasks import start_continuous_monitoring
+
                 start_continuous_monitoring.delay()
                 self.stdout.write(
-                    self.style.SUCCESS(
-                        "✓ Continuous monitoring started!"
-                    )
+                    self.style.SUCCESS("✓ Continuous monitoring started!")
                 )
             except Exception as e:
                 self.stdout.write(
@@ -41,7 +41,7 @@ class Command(BaseCommand):
                         f"python manage.py start_continuous_monitoring"
                     )
                 )
-        
+
         self.stdout.write(
             self.style.WARNING(
                 "\nYou can configure these settings via the Django admin panel:\n"
