@@ -134,11 +134,11 @@ dokku letsencrypt:enable dns-checker
 
 ### 📚 Documentation Files
 
-1. **README.md** - Complete project overview and setup
+1. **../README.md** - Complete project overview and setup
 2. **DOKKU_DEPLOYMENT.md** - Detailed production deployment guide
 3. **DEPLOYMENT_CHECKLIST.md** - Step-by-step deployment verification
 4. **PROJECT_STATUS.md** - Implementation status and features
-5. **sample_domains.txt** - Test domains for initial setup
+5. **../sample_domains.txt** - Test domains for initial setup
 
 ### 🎉 Ready for Production Use!
 

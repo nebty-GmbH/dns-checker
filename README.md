@@ -30,9 +30,9 @@ A Django web application that automatically monitors DNS A-record changes for a 
    git push dokku main
    ```
 
-2. **Complete Setup:** Follow the comprehensive [Dokku Deployment Guide](DOKKU_DEPLOYMENT.md)
+2. **Complete Setup:** Follow the comprehensive [Dokku Deployment Guide](docs/DOKKU_DEPLOYMENT.md)
 
-3. **Deployment Checklist:** Use the [Deployment Checklist](DEPLOYMENT_CHECKLIST.md)
+3. **Deployment Checklist:** Use the [Deployment Checklist](docs/DEPLOYMENT_CHECKLIST.md)
 
 ### Local Development
 
@@ -60,7 +60,7 @@ A Django web application that automatically monitors DNS A-record changes for a 
 
 4. **Access Django Admin:**
    - Go to http://localhost:8000/admin/
-   - Login: `admin` / `admin123`
+   - Login: `admin` / `admin123` (example)
 
 ## Features
 
@@ -233,14 +233,22 @@ dns_checker/
 │   └── management/commands/
 │       ├── import_domains.py    # Domain import command
 │       └── check_domains.py     # Manual check command
+├── docs/                 # Documentation files
+│   ├── README.md         # Documentation index
+│   ├── DOKKU_DEPLOYMENT.md      # Complete deployment guide
+│   ├── DEPLOYMENT_CHECKLIST.md # Deployment checklist
+│   ├── API_DOCUMENTATION.md    # API reference
+│   ├── MONITOR_CONFIGURATION.md # Monitor setup
+│   ├── CONTINUOUS_MONITORING.md # Continuous monitoring
+│   ├── PRE_COMMIT_SETUP.md     # Pre-commit hooks
+│   ├── PRODUCTION_READY.md     # Production checklist
+│   └── PROJECT_STATUS.md       # Implementation status
 ├── requirements.txt      # Python dependencies
 ├── Procfile             # Process configuration for Dokku
 ├── runtime.txt          # Python version specification
 ├── sample_domains.txt    # Sample domains for testing
 ├── run.sh               # Helper script for development
 ├── test_production.sh   # Production testing script
-├── DOKKU_DEPLOYMENT.md  # Complete deployment guide
-├── DEPLOYMENT_CHECKLIST.md # Deployment checklist
 └── README.md            # This file
 ```
 
@@ -296,9 +304,16 @@ dokku logs dns-checker --tail
 
 ## Support & Documentation
 
-- **[Dokku Deployment Guide](DOKKU_DEPLOYMENT.md)**: Complete production deployment instructions
-- **[Deployment Checklist](DEPLOYMENT_CHECKLIST.md)**: Step-by-step deployment verification
-- **[Project Status](PROJECT_STATUS.md)**: Implementation status and features
+### 📚 Available Documentation
+
+- **[Dokku Deployment Guide](docs/DOKKU_DEPLOYMENT.md)**: Complete production deployment instructions
+- **[Deployment Checklist](docs/DEPLOYMENT_CHECKLIST.md)**: Step-by-step deployment verification
+- **[Project Status](docs/PROJECT_STATUS.md)**: Implementation status and features
+- **[API Documentation](docs/API_DOCUMENTATION.md)**: REST API endpoints and usage
+- **[Monitor Configuration](docs/MONITOR_CONFIGURATION.md)**: Monitoring setup and configuration
+- **[Continuous Monitoring](docs/CONTINUOUS_MONITORING.md)**: Continuous monitoring features
+- **[Pre-commit Setup](docs/PRE_COMMIT_SETUP.md)**: Code quality and pre-commit hooks setup
+- **[Production Ready](docs/PRODUCTION_READY.md)**: Production readiness checklist
 
 ## License
 

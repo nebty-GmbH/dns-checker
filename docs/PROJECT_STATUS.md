@@ -78,7 +78,8 @@ dns_checker/
 ├── sample_domains.txt     # Test domains
 ├── run.sh                # Helper script
 ├── .env                  # Environment variables
-└── README.md             # Documentation
+├── docs/                 # Documentation files
+└── README.md             # Main documentation
 ```
 
 ### 🚀 Quick Start Commands
