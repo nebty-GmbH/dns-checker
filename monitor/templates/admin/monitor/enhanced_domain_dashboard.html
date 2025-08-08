@@ -1,0 +1,541 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}Enhanced Domain Dashboard | {{ site_title|default:"DNS Monitor Admin" }}{% endblock %}
+
+{% block extrahead %}
+<style>
+.domain-dashboard {
+    padding: 20px;
+}
+
+.stats-row {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+}
+
+.stat-card {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    flex: 1;
+    min-width: 200px;
+    text-align: center;
+}
+
+.stat-number {
+    font-size: 2em;
+    font-weight: bold;
+    color: #2c3e50;
+    display: block;
+}
+
+.stat-label {
+    color: #6c757d;
+    margin-top: 5px;
+}
+
+.filters-section {
+    background: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.filter-row {
+    display: flex;
+    gap: 15px;
+    align-items: end;
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    min-width: 150px;
+}
+
+.filter-group label {
+    margin-bottom: 5px;
+    font-weight: 500;
+    color: #495057;
+}
+
+.filter-group input,
+.filter-group select {
+    padding: 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 14px;
+    transition: background-color 0.2s;
+}
+
+.btn-primary {
+    background-color: #007bff;
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: #0056b3;
+}
+
+.btn-success {
+    background-color: #28a745;
+    color: white;
+}
+
+.btn-success:hover {
+    background-color: #1e7e34;
+}
+
+.btn-warning {
+    background-color: #ffc107;
+    color: #212529;
+}
+
+.btn-warning:hover {
+    background-color: #e0a800;
+}
+
+.btn-danger {
+    background-color: #dc3545;
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #c82333;
+}
+
+.domains-table {
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.domains-table table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.domains-table th,
+.domains-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.domains-table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    color: #495057;
+}
+
+.domains-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+.domain-name {
+    font-weight: 500;
+    color: #007bff;
+    text-decoration: none;
+}
+
+.domain-name:hover {
+    text-decoration: underline;
+}
+
+.status-indicator {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+.status-active {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.status-inactive {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.change-indicator {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.change-recent {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.change-suspicious {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.change-stable {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.ips-list {
+    font-family: monospace;
+    font-size: 12px;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.metric-small {
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.bulk-actions {
+    margin: 15px 0;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    display: none;
+}
+
+.bulk-actions.show {
+    display: block;
+}
+
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 20px 0;
+    gap: 10px;
+}
+
+.pagination a,
+.pagination span {
+    padding: 8px 12px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    text-decoration: none;
+    color: #007bff;
+}
+
+.pagination .current {
+    background-color: #007bff;
+    color: white;
+    border-color: #007bff;
+}
+
+.clear-filters {
+    color: #dc3545;
+    text-decoration: none;
+    font-size: 14px;
+}
+
+.clear-filters:hover {
+    text-decoration: underline;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="domain-dashboard">
+    <h1>{{ title }}</h1>
+    
+    <!-- Summary Statistics -->
+    <div class="stats-row">
+        <div class="stat-card">
+            <span class="stat-number">{{ summary_stats.total_domains }}</span>
+            <div class="stat-label">Total Domains</div>
+        </div>
+        <div class="stat-card">
+            <span class="stat-number">{{ summary_stats.active_domains }}</span>
+            <div class="stat-label">Active Domains</div>
+        </div>
+        <div class="stat-card">
+            <span class="stat-number">{{ summary_stats.domains_with_recent_changes }}</span>
+            <div class="stat-label">Changed (7 days)</div>
+        </div>
+        <div class="stat-card">
+            <span class="stat-number">{{ summary_stats.total_checks_today }}</span>
+            <div class="stat-label">Checks Today</div>
+        </div>
+    </div>
+    
+    <!-- Filters -->
+    <div class="filters-section">
+        <form method="get" id="filter-form">
+            <div class="filter-row">
+                <div class="filter-group">
+                    <label for="search">Search</label>
+                    <input type="text" id="search" name="search" value="{{ search_query }}" 
+                           placeholder="Domain name or IP...">
+                </div>
+                
+                <div class="filter-group">
+                    <label for="status">Status</label>
+                    <select id="status" name="status">
+                        <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                        <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+                        <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
+                    </select>
+                </div>
+                
+                <div class="filter-group">
+                    <label for="activity">Activity</label>
+                    <select id="activity" name="activity">
+                        <option value="all" {% if activity_filter == 'all' %}selected{% endif %}>All</option>
+                        <option value="recent" {% if activity_filter == 'recent' %}selected{% endif %}>Recent (7 days)</option>
+                        <option value="stale" {% if activity_filter == 'stale' %}selected{% endif %}>Stale (>7 days)</option>
+                    </select>
+                </div>
+                
+                <div class="filter-group">
+                    <label for="changes">Changes</label>
+                    <select id="changes" name="changes">
+                        <option value="all" {% if change_filter == 'all' %}selected{% endif %}>All</option>
+                        <option value="changed" {% if change_filter == 'changed' %}selected{% endif %}>Recently Changed</option>
+                        <option value="stable" {% if change_filter == 'stable' %}selected{% endif %}>Stable</option>
+                        <option value="suspicious" {% if change_filter == 'suspicious' %}selected{% endif %}>Suspicious (>2 changes)</option>
+                    </select>
+                </div>
+                
+                <div class="filter-group">
+                    <button type="submit" class="btn btn-primary">Apply Filters</button>
+                </div>
+            </div>
+            
+            {% if has_filters %}
+            <div style="margin-top: 10px;">
+                <a href="?" class="clear-filters">Clear all filters</a>
+            </div>
+            {% endif %}
+        </form>
+    </div>
+    
+    <!-- Bulk Actions -->
+    <div id="bulk-actions" class="bulk-actions">
+        <strong>Bulk Actions:</strong>
+        <button type="button" class="btn btn-success" onclick="bulkAction('activate')">Activate Selected</button>
+        <button type="button" class="btn btn-warning" onclick="bulkAction('deactivate')">Deactivate Selected</button>
+        <button type="button" class="btn btn-primary" onclick="bulkAction('check_now')">Check Now</button>
+        <button type="button" class="btn btn-danger" onclick="exportSelected()">Export Selected</button>
+        <span id="bulk-count">0 domains selected</span>
+    </div>
+    
+    <!-- Domains Table -->
+    <div class="domains-table">
+        <table>
+            <thead>
+                <tr>
+                    <th width="30">
+                        <input type="checkbox" id="select-all" onchange="toggleSelectAll()">
+                    </th>
+                    <th>Domain</th>
+                    <th>Status</th>
+                    <th>Last Known IPs</th>
+                    <th>Checks</th>
+                    <th>Changes</th>
+                    <th>Recent Activity</th>
+                    <th>Last Updated</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for domain in domains %}
+                <tr>
+                    <td>
+                        <input type="checkbox" class="domain-checkbox" value="{{ domain.id }}" 
+                               onchange="updateBulkActions()">
+                    </td>
+                    <td>
+                        <a href="{% url 'admin:monitor_domain_timeline' domain.id %}" class="domain-name">
+                            {{ domain.name }}
+                        </a>
+                    </td>
+                    <td>
+                        <span class="status-indicator {% if domain.is_active %}status-active{% else %}status-inactive{% endif %}">
+                            {% if domain.is_active %}Active{% else %}Inactive{% endif %}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="ips-list" title="{{ domain.last_known_ips|default:'None' }}">
+                            {{ domain.last_known_ips|default:'None'|truncatechars:20 }}
+                        </span>
+                    </td>
+                    <td>
+                        <strong>{{ domain.total_checks|default:0 }}</strong>
+                        {% if domain.error_count %}
+                        <span class="metric-small">({{ domain.error_count }} errors)</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <strong>{{ domain.total_changes|default:0 }}</strong>
+                        {% if domain.last_change_date %}
+                        <div class="metric-small">Last: {{ domain.last_change_date|date:"M d, H:i" }}</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if domain.recent_changes > 2 %}
+                        <span class="change-indicator change-suspicious">
+                            {{ domain.recent_changes }} changes (7d)
+                        </span>
+                        {% elif domain.recent_changes > 0 %}
+                        <span class="change-indicator change-recent">
+                            {{ domain.recent_changes }} changes (7d)
+                        </span>
+                        {% else %}
+                        <span class="change-indicator change-stable">
+                            Stable
+                        </span>
+                        {% endif %}
+                        
+                        {% if domain.last_7_days_checks %}
+                        <div class="metric-small">{{ domain.last_7_days_checks }} checks (7d)</div>
+                        {% endif %}
+                    </td>
+                    <td>{{ domain.updated_at|date:"M d, H:i" }}</td>
+                    <td>
+                        <a href="{% url 'admin:monitor_domain_timeline' domain.id %}" class="btn btn-primary" style="font-size: 12px;">
+                            Timeline
+                        </a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="9" style="text-align: center; padding: 40px; color: #6c757d;">
+                        {% if has_filters %}
+                        No domains match the current filters.
+                        {% else %}
+                        No domains found. <a href="{% url 'admin:monitor_domain_add' %}">Add the first domain</a>.
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Pagination -->
+    {% if domains.has_other_pages %}
+    <div class="pagination">
+        {% if domains.has_previous %}
+            <a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ domains.previous_page_number }}">« Previous</a>
+        {% endif %}
+        
+        <span class="current">
+            Page {{ domains.number }} of {{ domains.paginator.num_pages }}
+        </span>
+        
+        {% if domains.has_next %}
+            <a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ domains.next_page_number }}">Next »</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function toggleSelectAll() {
+    const selectAll = document.getElementById('select-all');
+    const checkboxes = document.querySelectorAll('.domain-checkbox');
+    checkboxes.forEach(cb => cb.checked = selectAll.checked);
+    updateBulkActions();
+}
+
+function updateBulkActions() {
+    const checkboxes = document.querySelectorAll('.domain-checkbox:checked');
+    const bulkActions = document.getElementById('bulk-actions');
+    const bulkCount = document.getElementById('bulk-count');
+    
+    if (checkboxes.length > 0) {
+        bulkActions.classList.add('show');
+        bulkCount.textContent = `${checkboxes.length} domains selected`;
+    } else {
+        bulkActions.classList.remove('show');
+    }
+}
+
+function getSelectedDomainIds() {
+    const checkboxes = document.querySelectorAll('.domain-checkbox:checked');
+    return Array.from(checkboxes).map(cb => cb.value);
+}
+
+function bulkAction(action) {
+    const domainIds = getSelectedDomainIds();
+    if (domainIds.length === 0) {
+        alert('Please select at least one domain.');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to ${action} ${domainIds.length} domains?`)) {
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('action', action);
+    domainIds.forEach(id => formData.append('domain_ids', id));
+    
+    fetch('{% url "admin:monitor_bulk_domain_actions" %}', {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || 
+                          document.querySelector('meta[name=csrf-token]')?.content
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.success);
+            location.reload();
+        } else {
+            alert(data.error || 'An error occurred');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('An error occurred while performing the action.');
+    });
+}
+
+function exportSelected() {
+    const domainIds = getSelectedDomainIds();
+    if (domainIds.length === 0) {
+        alert('Please select at least one domain.');
+        return;
+    }
+    
+    const params = domainIds.map(id => `domain_ids=${id}`).join('&');
+    window.open(`{% url "admin:monitor_domain_export" %}?${params}&format=json`);
+}
+
+// Auto-submit form on filter changes
+document.querySelectorAll('#filter-form select').forEach(select => {
+    select.addEventListener('change', () => {
+        document.getElementById('filter-form').submit();
+    });
+});
+</script>
+{% endblock %}
