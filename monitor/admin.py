@@ -2,9 +2,9 @@ import logging
 
 from django.contrib import admin
 from django.core.exceptions import ObjectDoesNotExist
+from django.shortcuts import redirect
 from django.urls import path, reverse
 from django.utils.html import format_html
-from django.shortcuts import redirect
 
 from .models import (
     APIKey,
@@ -84,10 +84,30 @@ class DomainAdmin(admin.ModelAdmin):
                 return f"{', '.join(ips[:3])}... (+{len(ips)-3} more)"
         return "Not checked yet"
 
+    def get_queryset(self, request):
+        """Optimize list queryset to annotate counts and avoid N+1 queries."""
+        qs = super().get_queryset(request)
+        # Annotate counts and last log info to avoid per-row queries
+        from django.db.models import Count, OuterRef, Subquery
+
+        from .models import RecordLog
+
+        last_log = RecordLog.objects.filter(domain=OuterRef("pk")).order_by(
+            "-timestamp"
+        )
+        return qs.annotate(
+            _record_count=Count("record_logs"),
+            _snapshot_count=Count("snapshots"),
+            _last_is_change=Subquery(last_log.values("is_change")[:1]),
+            _last_error_message=Subquery(last_log.values("error_message")[:1]),
+        )
+
     @admin.display(description="Record Logs")
     def record_count(self, obj):
-        """Count of record logs for this domain."""
-        count = obj.record_logs.count()
+        """Count of record logs for this domain using annotation when available."""
+        count = getattr(obj, "_record_count", None)
+        if count is None:
+            count = obj.record_logs.count()
         if count > 0:
             url = (
                 reverse("admin:monitor_recordlog_changelist")
@@ -98,8 +118,10 @@ class DomainAdmin(admin.ModelAdmin):
 
     @admin.display(description="Snapshots")
     def snapshot_count(self, obj):
-        """Count of snapshots for this domain."""
-        count = obj.snapshots.count()
+        """Count of snapshots for this domain using annotation when available."""
+        count = getattr(obj, "_snapshot_count", None)
+        if count is None:
+            count = obj.snapshots.count()
         if count > 0:
             url = (
                 reverse("admin:monitor_domainsnapshot_changelist")
@@ -111,6 +133,20 @@ class DomainAdmin(admin.ModelAdmin):
     @admin.display(description="Last Check Status")
     def last_check_status(self, obj):
         """Display the status of the last check."""
+        # Prefer annotations to avoid N+1
+        err = getattr(obj, "_last_error_message", None)
+        is_change = getattr(obj, "_last_is_change", None)
+        if err is not None or is_change is not None:
+            if err:
+                return format_html(
+                    '<span style="color: red;">ERROR: {}</span>',
+                    (err or "")[:50],
+                )
+            elif is_change:
+                return format_html('<span style="color: orange;">CHANGED</span>')
+            else:
+                return format_html('<span style="color: green;">OK</span>')
+        # Fallback
         last_log = obj.record_logs.first()
         if last_log:
             if last_log.error_message:
@@ -127,47 +163,67 @@ class DomainAdmin(admin.ModelAdmin):
     @admin.display(description="Actions")
     def enhanced_actions(self, obj):
         """Display enhanced action buttons."""
-        timeline_url = reverse('admin:monitor_domain_timeline', args=[obj.id])
+        timeline_url = reverse("admin:monitor_domain_timeline", args=[obj.id])
         return format_html(
             '<a href="{}" class="button" style="background: #007bff; color: white; padding: 4px 8px; text-decoration: none; border-radius: 3px; font-size: 12px;">Timeline</a>',
-            timeline_url
+            timeline_url,
         )
-    
+
     def get_urls(self):
         """Add custom URLs for enhanced admin views."""
         urls = super().get_urls()
         custom_urls = [
-            path('enhanced-dashboard/', self.admin_site.admin_view(self.enhanced_dashboard_view), name='monitor_enhanced_domain_dashboard'),
-            path('<int:domain_id>/timeline/', self.admin_site.admin_view(self.timeline_view), name='monitor_domain_timeline'),
-            path('export/', self.admin_site.admin_view(self.export_view), name='monitor_domain_export'),
-            path('bulk-actions/', self.admin_site.admin_view(self.bulk_actions_view), name='monitor_bulk_domain_actions'),
+            path(
+                "enhanced-dashboard/",
+                self.admin_site.admin_view(self.enhanced_dashboard_view),
+                name="monitor_enhanced_domain_dashboard",
+            ),
+            path(
+                "<int:domain_id>/timeline/",
+                self.admin_site.admin_view(self.timeline_view),
+                name="monitor_domain_timeline",
+            ),
+            path(
+                "export/",
+                self.admin_site.admin_view(self.export_view),
+                name="monitor_domain_export",
+            ),
+            path(
+                "bulk-actions/",
+                self.admin_site.admin_view(self.bulk_actions_view),
+                name="monitor_bulk_domain_actions",
+            ),
         ]
         return custom_urls + urls
-    
+
     def enhanced_dashboard_view(self, request):
         """Enhanced domain dashboard view."""
         from .admin_views import enhanced_domain_dashboard
+
         return enhanced_domain_dashboard(request)
-    
+
     def timeline_view(self, request, domain_id):
         """Domain timeline view."""
         from .admin_views import domain_timeline_view
+
         return domain_timeline_view(request, domain_id)
-    
+
     def export_view(self, request):
         """Domain export view."""
         from .admin_views import domain_export_view
+
         return domain_export_view(request)
-    
+
     def bulk_actions_view(self, request):
         """Bulk actions view."""
         from .admin_views import bulk_domain_actions
+
         return bulk_domain_actions(request)
-    
+
     def changelist_view(self, request, extra_context=None):
         """Redirect to enhanced dashboard by default."""
         if not request.GET:  # Only redirect if no filters/search are applied
-            return redirect('admin:monitor_enhanced_domain_dashboard')
+            return redirect("admin:monitor_enhanced_domain_dashboard")
         return super().changelist_view(request, extra_context)
 
     actions = ["check_domains_now", "activate_domains", "deactivate_domains"]
@@ -330,6 +386,18 @@ class RecordLogAdmin(admin.ModelAdmin):
             )
             return "Error"
 
+    def get_queryset(self, request):
+        """Optimize queryset to fetch related objects and count IP info efficiently."""
+        qs = super().get_queryset(request)
+        # Avoid N+1 for has_snapshot and ip_info count
+        return (
+            qs.select_related("domain")
+            .prefetch_related("ip_info_entries")
+            .only(
+                "id", "domain__name", "ips", "is_change", "timestamp", "error_message"
+            )
+        )
+
     @admin.display(description="IP Info")
     def ip_info_count(self, obj):
         """Display count of associated IP information."""
@@ -337,8 +405,12 @@ class RecordLogAdmin(admin.ModelAdmin):
             if not hasattr(obj, "ip_info_entries"):
                 logger.debug(f"RecordLog {obj.id} has no ip_info_entries relation")
                 return "0 IPs"
-
-            count = obj.ip_info_entries.count()
+            # Use prefetched objects cache when available to avoid COUNT(*)
+            prefetched = getattr(obj, "_prefetched_objects_cache", {}) or {}
+            if "ip_info_entries" in prefetched:
+                count = len(prefetched["ip_info_entries"])  # type: ignore[index]
+            else:
+                count = obj.ip_info_entries.count()
             if count > 0:
                 url = (
                     reverse("admin:monitor_recordlogipinfo_changelist")

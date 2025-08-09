@@ -98,13 +98,21 @@ WSGI_APPLICATION = "dns_checker.wsgi.application"
 
 # Use DATABASE_URL if available (for Dokku/Heroku), otherwise fallback to SQLite
 DATABASE_URL = cast(str, config("DATABASE_URL", default=""))
+# Enable persistent DB connections to reduce connection overhead in admin views
+CONN_MAX_AGE = cast(int, config("CONN_MAX_AGE", default=60, cast=int))
 if DATABASE_URL:
-    DATABASES = {"default": dj_database_url.parse(cast(str, DATABASE_URL))}
+    # Pass conn_max_age to enable persistent connections when using dj_database_url
+    DATABASES = {
+        "default": dj_database_url.parse(
+            cast(str, DATABASE_URL), conn_max_age=CONN_MAX_AGE
+        )
+    }
 else:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": BASE_DIR / "db.sqlite3",
+            "CONN_MAX_AGE": CONN_MAX_AGE,
         }
     }
 

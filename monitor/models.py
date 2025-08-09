@@ -32,6 +32,11 @@ class Domain(models.Model):
         ordering = ["name"]
         verbose_name = "Domain"
         verbose_name_plural = "Domains"
+        indexes = [
+            models.Index(fields=["is_active"]),
+            models.Index(fields=["updated_at"]),
+            models.Index(fields=["created_at"]),
+        ]
 
     def __str__(self):
         return self.name
