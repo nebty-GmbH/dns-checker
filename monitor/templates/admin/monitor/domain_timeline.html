@@ -1,0 +1,622 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}{{ title }} | {{ site_title|default:"DNS Monitor Admin" }}{% endblock %}
+
+{% block extrahead %}
+<style>
+.domain-timeline {
+    padding: 20px;
+}
+
+.domain-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    padding: 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 12px;
+}
+
+.domain-title {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 300;
+}
+
+.domain-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.status-badge {
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.status-active {
+    background-color: rgba(40, 167, 69, 0.2);
+    border: 1px solid rgba(40, 167, 69, 0.5);
+}
+
+.status-inactive {
+    background-color: rgba(220, 53, 69, 0.2);
+    border: 1px solid rgba(220, 53, 69, 0.5);
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.stat-card {
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: transform 0.2s;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.stat-value {
+    font-size: 2.5em;
+    font-weight: bold;
+    margin-bottom: 5px;
+    color: #2c3e50;
+}
+
+.stat-label {
+    color: #7f8c8d;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-sublabel {
+    color: #95a5a6;
+    font-size: 12px;
+    margin-top: 5px;
+}
+
+.timeline-container {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.timeline-header {
+    background: #f8f9fa;
+    padding: 20px;
+    border-bottom: 1px solid #e9ecef;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.timeline-title {
+    margin: 0;
+    color: #495057;
+    font-size: 20px;
+}
+
+.timeline-filter {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.timeline-filter select {
+    padding: 5px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.timeline-content {
+    max-height: 800px;
+    overflow-y: auto;
+    padding: 0;
+}
+
+.timeline-event {
+    border-bottom: 1px solid #f1f3f4;
+    padding: 20px;
+    position: relative;
+    transition: background-color 0.2s;
+}
+
+.timeline-event:hover {
+    background-color: #f8f9fa;
+}
+
+.timeline-event:last-child {
+    border-bottom: none;
+}
+
+.event-marker {
+    position: absolute;
+    left: 20px;
+    top: 25px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 3px solid white;
+    box-shadow: 0 0 0 1px #dee2e6;
+}
+
+.event-marker.change {
+    background-color: #ffc107;
+}
+
+.event-marker.check {
+    background-color: #28a745;
+}
+
+.event-marker.error {
+    background-color: #dc3545;
+}
+
+.event-marker.snapshot {
+    background-color: #007bff;
+}
+
+.event-content {
+    margin-left: 50px;
+}
+
+.event-title {
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.event-timestamp {
+    color: #6c757d;
+    font-size: 13px;
+    font-weight: normal;
+}
+
+.event-details {
+    color: #6c757d;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.event-ips {
+    background: #f8f9fa;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 13px;
+    margin: 8px 0;
+    border-left: 3px solid #dee2e6;
+}
+
+.event-ips.changed {
+    border-left-color: #ffc107;
+    background: #fff8e1;
+}
+
+.event-error {
+    background: #ffe6e6;
+    border: 1px solid #ffcccc;
+    padding: 10px;
+    border-radius: 6px;
+    margin: 8px 0;
+    font-size: 13px;
+    color: #721c24;
+}
+
+.ip-whois-info {
+    margin-top: 10px;
+    background: #f0f8ff;
+    border: 1px solid #b3d9ff;
+    border-radius: 6px;
+    padding: 10px;
+}
+
+.ip-whois-title {
+    font-weight: 600;
+    color: #0066cc;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
+.ip-whois-entry {
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: #495057;
+}
+
+.ip-whois-entry:last-child {
+    margin-bottom: 0;
+}
+
+.ip-address {
+    font-family: monospace;
+    font-weight: 600;
+    color: #007bff;
+}
+
+.snapshot-info {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
+    font-size: 13px;
+}
+
+.snapshot-metric {
+    background: #f8f9fa;
+    padding: 8px;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.snapshot-metric-value {
+    font-weight: 600;
+    color: #495057;
+    display: block;
+}
+
+.snapshot-metric-label {
+    color: #6c757d;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    color: #007bff;
+    font-weight: 500;
+    margin-bottom: 20px;
+    padding: 8px 16px;
+    border: 1px solid #007bff;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+.back-link:hover {
+    background-color: #007bff;
+    color: white;
+    text-decoration: none;
+}
+
+.no-events {
+    text-align: center;
+    padding: 60px 20px;
+    color: #6c757d;
+}
+
+.no-events-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+}
+
+.btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 14px;
+    transition: background-color 0.2s;
+}
+
+.btn-primary {
+    background-color: #007bff;
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: #0056b3;
+}
+
+.recent-stats {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.recent-stats h4 {
+    margin: 0 0 10px 0;
+    font-size: 16px;
+}
+
+.recent-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+    text-align: center;
+}
+
+.recent-stat {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 10px;
+    border-radius: 6px;
+}
+
+.recent-stat-value {
+    font-size: 24px;
+    font-weight: bold;
+    display: block;
+}
+
+.recent-stat-label {
+    font-size: 12px;
+    opacity: 0.9;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="domain-timeline">
+    <a href="{% url 'admin:monitor_enhanced_domain_dashboard' %}" class="back-link">
+        ← Back to Domain Dashboard
+    </a>
+    
+    <!-- Domain Header -->
+    <div class="domain-header">
+        <div>
+            <h1 class="domain-title">{{ domain.name }}</h1>
+            <div style="margin-top: 8px; opacity: 0.9;">
+                Created: {{ domain.created_at|date:"M d, Y H:i" }} | 
+                Last Check: {{ domain.updated_at|date:"M d, Y H:i" }}
+            </div>
+        </div>
+        <div class="domain-status">
+            <span class="status-badge {% if domain.is_active %}status-active{% else %}status-inactive{% endif %}">
+                {% if domain.is_active %}Active{% else %}Inactive{% endif %}
+            </span>
+            <a href="{% url 'admin:monitor_domain_change' domain.id %}" class="btn btn-primary">
+                Edit Domain
+            </a>
+        </div>
+    </div>
+    
+    <!-- Recent Activity Summary -->
+    {% if recent_stats.checks > 0 %}
+    <div class="recent-stats">
+        <h4>Last 30 Days Activity</h4>
+        <div class="recent-stats-grid">
+            <div class="recent-stat">
+                <span class="recent-stat-value">{{ recent_stats.checks }}</span>
+                <span class="recent-stat-label">Checks</span>
+            </div>
+            <div class="recent-stat">
+                <span class="recent-stat-value">{{ recent_stats.changes }}</span>
+                <span class="recent-stat-label">Changes</span>
+            </div>
+            <div class="recent-stat">
+                <span class="recent-stat-value">{{ recent_stats.errors }}</span>
+                <span class="recent-stat-label">Errors</span>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    
+    <!-- Domain Statistics -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ domain_stats.total_checks }}</div>
+            <div class="stat-label">Total Checks</div>
+            {% if domain_stats.first_check %}
+            <div class="stat-sublabel">Since {{ domain_stats.first_check|date:"M d, Y" }}</div>
+            {% endif %}
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value">{{ domain_stats.total_changes }}</div>
+            <div class="stat-label">DNS Changes</div>
+            <div class="stat-sublabel">{{ domain_stats.change_frequency|floatformat:1 }}% change rate</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value">{{ domain_stats.unique_ips }}</div>
+            <div class="stat-label">Unique IPs Seen</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value">{{ domain_stats.total_snapshots }}</div>
+            <div class="stat-label">Snapshots</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value">{{ domain_stats.error_rate|floatformat:1 }}%</div>
+            <div class="stat-label">Error Rate</div>
+        </div>
+    </div>
+    
+    <!-- Timeline -->
+    <div class="timeline-container">
+        <div class="timeline-header">
+            <h3 class="timeline-title">Activity Timeline</h3>
+            <div class="timeline-filter">
+                <label for="event-filter">Filter:</label>
+                <select id="event-filter" onchange="filterEvents()">
+                    <option value="all">All Events</option>
+                    <option value="change">Changes Only</option>
+                    <option value="error">Errors Only</option>
+                    <option value="snapshot">Snapshots Only</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="timeline-content">
+            {% if timeline_events %}
+                {% for event in timeline_events %}
+                <div class="timeline-event" data-event-type="{{ event.type }}">
+                    <div class="event-marker {{ event.type }}"></div>
+                    <div class="event-content">
+                        <div class="event-title">
+                            {{ event.title }}
+                            <span class="event-timestamp">{{ event.timestamp|date:"M d, Y H:i:s" }}</span>
+                        </div>
+                        
+                        {% if event.type == 'change' or event.type == 'check' or event.type == 'error' %}
+                            <div class="event-details">
+                                {% if event.ips %}
+                                <div class="event-ips {% if event.type == 'change' %}changed{% endif %}">
+                                    IPs: {{ event.ips|join:", " }}
+                                </div>
+                                {% endif %}
+                                
+                                {% if event.error %}
+                                <div class="event-error">
+                                    <strong>Error:</strong> {{ event.error }}
+                                </div>
+                                {% endif %}
+                                
+                                {% if event.ip_info %}
+                                <div class="ip-whois-info">
+                                    <div class="ip-whois-title">IP WHOIS Information:</div>
+                                    {% for ip_info in event.ip_info %}
+                                    <div class="ip-whois-entry">
+                                        <span class="ip-address">{{ ip_info.ip_address }}</span>:
+                                        {% if ip_info.ip_whois_info %}
+                                            {{ ip_info.ip_whois_info.organization|default:"Unknown Org" }}
+                                            ({{ ip_info.ip_whois_info.asn|default:"Unknown ASN" }})
+                                            {% if ip_info.ip_whois_info.country %}
+                                            - {{ ip_info.ip_whois_info.country }}
+                                            {% endif %}
+                                        {% else %}
+                                            No WHOIS data available
+                                        {% endif %}
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                                
+                                {% if event.has_snapshot %}
+                                <div class="event-details">
+                                    📸 <a href="{% url 'admin:monitor_domainsnapshot_change' event.data.snapshot.id %}">View associated snapshot</a>
+                                </div>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                        
+                        {% if event.type == 'snapshot' %}
+                            <div class="event-details">
+                                <div class="snapshot-info">
+                                    <div class="snapshot-metric">
+                                        <span class="snapshot-metric-value">{{ event.status_code }}</span>
+                                        <span class="snapshot-metric-label">Status</span>
+                                    </div>
+                                    <div class="snapshot-metric">
+                                        <span class="snapshot-metric-value">{{ event.content_length|filesizeformat }}</span>
+                                        <span class="snapshot-metric-label">Size</span>
+                                    </div>
+                                    {% if event.response_time %}
+                                    <div class="snapshot-metric">
+                                        <span class="snapshot-metric-value">{{ event.response_time }}ms</span>
+                                        <span class="snapshot-metric-label">Response Time</span>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                
+                                {% if event.error %}
+                                <div class="event-error">
+                                    <strong>Snapshot Error:</strong> {{ event.error }}
+                                </div>
+                                {% endif %}
+                                
+                                <div style="margin-top: 10px;">
+                                    <a href="{% url 'admin:monitor_domainsnapshot_change' event.data.id %}" class="btn btn-primary">
+                                        View Snapshot Details
+                                    </a>
+                                </div>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+                
+                {% if total_events > 100 %}
+                <div class="timeline-event">
+                    <div class="event-content" style="text-align: center; color: #6c757d; font-style: italic;">
+                        Showing most recent 100 events of {{ total_events }} total.
+                        <a href="{% url 'admin:monitor_recordlog_changelist' %}?domain__id__exact={{ domain.id }}">
+                            View all record logs
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="no-events">
+                    <div class="no-events-icon">📊</div>
+                    <h4>No Activity Yet</h4>
+                    <p>This domain hasn't been checked yet or has no recorded activity.</p>
+                    <a href="{% url 'admin:monitor_domain_changelist' %}" class="btn btn-primary">
+                        Back to Domains
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+function filterEvents() {
+    const filter = document.getElementById('event-filter').value;
+    const events = document.querySelectorAll('.timeline-event');
+    
+    events.forEach(event => {
+        const eventType = event.getAttribute('data-event-type');
+        
+        if (filter === 'all' || eventType === filter) {
+            event.style.display = 'block';
+        } else {
+            event.style.display = 'none';
+        }
+    });
+}
+
+// Auto-refresh every 30 seconds for active domains
+{% if domain.is_active %}
+setInterval(() => {
+    // Check if we should refresh (only if user hasn't interacted recently)
+    const lastInteraction = localStorage.getItem('lastInteraction') || 0;
+    const now = Date.now();
+    
+    if (now - lastInteraction > 25000) { // 25 seconds of no interaction
+        location.reload();
+    }
+}, 30000);
+
+// Track user interactions
+document.addEventListener('click', () => {
+    localStorage.setItem('lastInteraction', Date.now());
+});
+
+document.addEventListener('scroll', () => {
+    localStorage.setItem('lastInteraction', Date.now());
+});
+{% endif %}
+</script>
+{% endblock %}

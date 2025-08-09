@@ -2,8 +2,9 @@ import logging
 
 from django.contrib import admin
 from django.core.exceptions import ObjectDoesNotExist
-from django.urls import reverse
+from django.urls import path, reverse
 from django.utils.html import format_html
+from django.shortcuts import redirect
 
 from .models import (
     APIKey,
@@ -36,6 +37,7 @@ class DomainAdmin(admin.ModelAdmin):
         "created_at",
         "record_count",
         "snapshot_count",
+        "enhanced_actions",
     ]
     list_filter = ["is_active", "created_at", "updated_at"]
     search_fields = ["name"]
@@ -121,6 +123,52 @@ class DomainAdmin(admin.ModelAdmin):
             else:
                 return format_html('<span style="color: green;">OK</span>')
         return "Never checked"
+
+    @admin.display(description="Actions")
+    def enhanced_actions(self, obj):
+        """Display enhanced action buttons."""
+        timeline_url = reverse('admin:monitor_domain_timeline', args=[obj.id])
+        return format_html(
+            '<a href="{}" class="button" style="background: #007bff; color: white; padding: 4px 8px; text-decoration: none; border-radius: 3px; font-size: 12px;">Timeline</a>',
+            timeline_url
+        )
+    
+    def get_urls(self):
+        """Add custom URLs for enhanced admin views."""
+        urls = super().get_urls()
+        custom_urls = [
+            path('enhanced-dashboard/', self.admin_site.admin_view(self.enhanced_dashboard_view), name='monitor_enhanced_domain_dashboard'),
+            path('<int:domain_id>/timeline/', self.admin_site.admin_view(self.timeline_view), name='monitor_domain_timeline'),
+            path('export/', self.admin_site.admin_view(self.export_view), name='monitor_domain_export'),
+            path('bulk-actions/', self.admin_site.admin_view(self.bulk_actions_view), name='monitor_bulk_domain_actions'),
+        ]
+        return custom_urls + urls
+    
+    def enhanced_dashboard_view(self, request):
+        """Enhanced domain dashboard view."""
+        from .admin_views import enhanced_domain_dashboard
+        return enhanced_domain_dashboard(request)
+    
+    def timeline_view(self, request, domain_id):
+        """Domain timeline view."""
+        from .admin_views import domain_timeline_view
+        return domain_timeline_view(request, domain_id)
+    
+    def export_view(self, request):
+        """Domain export view."""
+        from .admin_views import domain_export_view
+        return domain_export_view(request)
+    
+    def bulk_actions_view(self, request):
+        """Bulk actions view."""
+        from .admin_views import bulk_domain_actions
+        return bulk_domain_actions(request)
+    
+    def changelist_view(self, request, extra_context=None):
+        """Redirect to enhanced dashboard by default."""
+        if not request.GET:  # Only redirect if no filters/search are applied
+            return redirect('admin:monitor_enhanced_domain_dashboard')
+        return super().changelist_view(request, extra_context)
 
     actions = ["check_domains_now", "activate_domains", "deactivate_domains"]
 
