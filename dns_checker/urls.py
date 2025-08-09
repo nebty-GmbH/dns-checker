@@ -16,6 +16,7 @@ Including another URLconf
 """
 
 from django.contrib import admin
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.urls import include, path
 
@@ -24,8 +25,16 @@ def redirect_to_admin(request):
     return redirect("/admin/")
 
 
+def trigger_error(request: HttpRequest) -> HttpResponse:
+    # Intentionally trigger an error to verify Sentry setup
+    _ = 1 / 0
+    return HttpResponse("This line is never reached")
+
+
 urlpatterns = [
     path("", redirect_to_admin, name="home"),
     path("admin/", admin.site.urls),
     path("api/", include("monitor.api_urls")),
+    # Sentry verification route
+    path("sentry-debug/", trigger_error),
 ]

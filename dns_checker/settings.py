@@ -11,8 +11,10 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from typing import cast
 
 import dj_database_url
+import sentry_sdk
 from celery.schedules import crontab
 from decouple import config
 
@@ -32,16 +34,18 @@ SECRET_KEY = config(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DEBUG", default=False, cast=bool)
 
-ALLOWED_HOSTS_STR = config("ALLOWED_HOSTS", default="localhost,127.0.0.1", cast=str)
+ALLOWED_HOSTS_STR = cast(
+    str, config("ALLOWED_HOSTS", default="localhost,127.0.0.1", cast=str)
+)
 ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_STR.split(",")]
 
 # Add testserver for Django test client
 ALLOWED_HOSTS.append("testserver")
 
 # Add your Dokku domain
-DOKKU_DOMAIN = config("DOKKU_DOMAIN", default="", cast=str)
+DOKKU_DOMAIN = cast(str, config("DOKKU_DOMAIN", default="", cast=str))
 if DOKKU_DOMAIN:
-    ALLOWED_HOSTS.append(DOKKU_DOMAIN)
+    ALLOWED_HOSTS.append(cast(str, DOKKU_DOMAIN))
 
 
 # Application definition
@@ -93,9 +97,9 @@ WSGI_APPLICATION = "dns_checker.wsgi.application"
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 # Use DATABASE_URL if available (for Dokku/Heroku), otherwise fallback to SQLite
-DATABASE_URL = config("DATABASE_URL", default="")
+DATABASE_URL = cast(str, config("DATABASE_URL", default=""))
 if DATABASE_URL:
-    DATABASES = {"default": dj_database_url.parse(DATABASE_URL)}
+    DATABASES = {"default": dj_database_url.parse(cast(str, DATABASE_URL))}
 else:
     DATABASES = {
         "default": {
@@ -231,3 +235,9 @@ if not DEBUG:
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Sentry configuration
+sentry_sdk.init(
+    dsn="https://77dab0fb5a4c48aed15186c22ef0176f@o4507731323650048.ingest.de.sentry.io/4509814199353424",
+    send_default_pii=True,
+)
