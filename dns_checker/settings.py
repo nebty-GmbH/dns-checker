@@ -51,6 +51,15 @@ DOKKU_DOMAIN = cast(str, config("DOKKU_DOMAIN", default="", cast=str))
 if DOKKU_DOMAIN:
     ALLOWED_HOSTS.append(cast(str, DOKKU_DOMAIN))
 
+# CSRF trusted origins for cross-origin requests
+CSRF_TRUSTED_ORIGINS_STR = cast(
+    str, config("CSRF_TRUSTED_ORIGINS", default="", cast=str)
+)
+CSRF_TRUSTED_ORIGINS = []
+if CSRF_TRUSTED_ORIGINS_STR:
+    CSRF_TRUSTED_ORIGINS = [
+        origin.strip() for origin in CSRF_TRUSTED_ORIGINS_STR.split(",")
+    ]
 
 # Application definition
 
@@ -230,6 +239,19 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
 }
+
+# Proxy configuration for deployment behind reverse proxy
+USE_X_FORWARDED_HOST = config("USE_X_FORWARDED_HOST", default=False, cast=bool)
+USE_X_FORWARDED_PORT = config("USE_X_FORWARDED_PORT", default=False, cast=bool)
+
+# Configure Django to trust proxy SSL headers
+SECURE_PROXY_SSL_HEADER_STR = cast(
+    str, config("SECURE_PROXY_SSL_HEADER", default="", cast=str)
+)
+if SECURE_PROXY_SSL_HEADER_STR:
+    header_parts = SECURE_PROXY_SSL_HEADER_STR.split(",", 1)
+    if len(header_parts) == 2:
+        SECURE_PROXY_SSL_HEADER = (header_parts[0].strip(), header_parts[1].strip())
 
 # Security settings for production
 if not DEBUG:
