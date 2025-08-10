@@ -44,17 +44,6 @@
       }
     }
   },
-  "healthchecks": {
-    "web": [
-      {
-        "type": "startup",
-        "name": "web-startup",
-        "path": "/admin/login/",
-        "timeout": 30,
-        "attempts": 5
-      }
-    ]
-  },
   "env": {
     "DJANGO_SETTINGS_MODULE": {
       "description": "Django settings module to use",
