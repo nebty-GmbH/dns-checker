@@ -72,17 +72,46 @@ def check_domain_a_records(self, domain_id):
             previous_ips_string = domain.last_known_ips or ""
             is_change = current_ips_string != previous_ips_string
 
-            # Create log entry
-            record_log = RecordLog.objects.create(
-                domain=domain,
-                ips=current_ips_string,
-                is_change=is_change,
-                timestamp=timezone.now(),
-            )
+            # Smart change detection - only write to DB when actual changes occur
+            record_log = None
+            if is_change or not previous_ips_string:
+                # Only create log entry for actual changes or initial checks
+                record_log = RecordLog.objects.create(
+                    domain=domain,
+                    ips=current_ips_string,
+                    is_change=is_change,
+                    timestamp=timezone.now(),
+                )
 
-            # Update domain's last known IPs
-            domain.last_known_ips = current_ips_string
-            domain.save()
+                # Update domain's last known IPs and timestamp only when there are changes
+                domain.last_known_ips = current_ips_string
+                domain.save()
+
+                logger.info(
+                    f"{'Initial check' if not previous_ips_string else 'Change detected'} for {domain.name}: {current_ips_string}"
+                )
+            else:
+                # For no-change cases, only update timestamp without creating log entry
+                # This dramatically reduces database writes for stable domains
+                Domain.objects.filter(id=domain_id).update(updated_at=timezone.now())
+
+                # Reduce logging noise - only log every 10th check for unchanged domains
+                import random
+
+                if random.randint(1, 10) == 1:  # 10% sampling to reduce log volume
+                    logger.debug(f"No change for {domain.name}: {current_ips_string}")
+
+                return {
+                    "success": True,
+                    "domain": domain.name,
+                    "ips": current_ips_sorted,
+                    "is_change": False,
+                    "no_change_check": True,
+                    "previous_ips": (
+                        domain.get_last_known_ips_list() if previous_ips_string else []
+                    ),
+                    "timestamp": timezone.now().isoformat(),
+                }
 
             # Trigger snapshot capture for IP changes or initial domain check
             is_initial_check = (
@@ -94,7 +123,7 @@ def check_domain_a_records(self, domain_id):
                     f"Initial DNS check for {domain.name}: {current_ips_string}"
                 )
 
-                # Capture initial snapshot for new domain
+                # Capture initial snapshot for new domain (only for initial checks)
                 capture_domain_snapshot.delay(domain.id, record_log.id, is_initial=True)
 
                 # Fetch WHOIS info for initial IPs
@@ -104,16 +133,34 @@ def check_domain_a_records(self, domain_id):
                     f"DNS change detected for {domain.name}: {previous_ips_string} -> {current_ips_string}"
                 )
 
-                # Capture snapshot due to IP change
-                capture_domain_snapshot.delay(
-                    domain.id, record_log.id, is_initial=False
+                # Only capture snapshot for significant changes (not for minor IP reordering)
+                # Check if it's actually a meaningful change (different IPs, not just order)
+                previous_ips_set = (
+                    set(domain.get_last_known_ips_list())
+                    if previous_ips_string
+                    else set()
                 )
+                current_ips_set = set(current_ips_sorted)
 
-                # Fetch WHOIS info for changed IPs
+                if previous_ips_set != current_ips_set:
+                    # Meaningful change - capture snapshot
+                    capture_domain_snapshot.delay(
+                        domain.id, record_log.id, is_initial=False
+                    )
+                else:
+                    logger.debug(
+                        f"IP reordering only for {domain.name}, skipping snapshot"
+                    )
+
+                # Always fetch WHOIS info for IP changes
                 fetch_record_log_ip_info.delay(record_log.id)
 
-                # Send notification if enabled
-                if settings.email_notifications_enabled and settings.notification_email:
+                # Send notification if enabled (only for meaningful changes)
+                if (
+                    settings.email_notifications_enabled
+                    and settings.notification_email
+                    and previous_ips_set != current_ips_set
+                ):
                     send_change_notification.delay(domain.id, record_log.id)
             else:
                 logger.info(f"No DNS change for {domain.name}: {current_ips_string}")
@@ -144,14 +191,22 @@ def check_domain_a_records(self, domain_id):
                 },
             )
 
-            # Log the error
-            RecordLog.objects.create(
+            # Only log errors to database, don't create redundant error entries
+            # Check if we recently logged this same error to avoid spam
+            recent_error = RecordLog.objects.filter(
                 domain=domain,
-                ips="",
-                is_change=False,
-                error_message=error_msg,
-                timestamp=timezone.now(),
-            )
+                error_message__icontains="NXDOMAIN",
+                timestamp__gte=timezone.now() - timezone.timedelta(hours=1),
+            ).first()
+
+            if not recent_error:
+                RecordLog.objects.create(
+                    domain=domain,
+                    ips="",
+                    is_change=False,
+                    error_message=error_msg,
+                    timestamp=timezone.now(),
+                )
 
             return {"success": False, "domain": domain.name, "error": error_msg}
 
@@ -159,14 +214,21 @@ def check_domain_a_records(self, domain_id):
             error_msg = f"DNS lookup timeout for domain {domain.name}"
             logger.error(error_msg)
 
-            # Log the error
-            RecordLog.objects.create(
+            # Only log timeout errors to database if not recently logged
+            recent_error = RecordLog.objects.filter(
                 domain=domain,
-                ips="",
-                is_change=False,
-                error_message=error_msg,
-                timestamp=timezone.now(),
-            )
+                error_message__icontains="timeout",
+                timestamp__gte=timezone.now() - timezone.timedelta(hours=1),
+            ).first()
+
+            if not recent_error:
+                RecordLog.objects.create(
+                    domain=domain,
+                    ips="",
+                    is_change=False,
+                    error_message=error_msg,
+                    timestamp=timezone.now(),
+                )
 
             return {"success": False, "domain": domain.name, "error": error_msg}
 
@@ -174,14 +236,21 @@ def check_domain_a_records(self, domain_id):
             error_msg = f"No A records found for domain {domain.name}"
             logger.error(error_msg)
 
-            # Log the error
-            RecordLog.objects.create(
+            # Only log NoAnswer errors to database if not recently logged
+            recent_error = RecordLog.objects.filter(
                 domain=domain,
-                ips="",
-                is_change=False,
-                error_message=error_msg,
-                timestamp=timezone.now(),
-            )
+                error_message__icontains="No A records",
+                timestamp__gte=timezone.now() - timezone.timedelta(hours=1),
+            ).first()
+
+            if not recent_error:
+                RecordLog.objects.create(
+                    domain=domain,
+                    ips="",
+                    is_change=False,
+                    error_message=error_msg,
+                    timestamp=timezone.now(),
+                )
 
             return {"success": False, "domain": domain.name, "error": error_msg}
 
@@ -273,12 +342,24 @@ def capture_domain_snapshot(self, domain_id, record_log_id=None, is_initial=Fals
 
                 # Check if we got a reasonable response
                 if response.status_code < 400:
+                    # Limit content size to reduce disk I/O (store only first 50KB)
+                    max_content_size = 50 * 1024  # 50KB limit
+                    content = response.text
+                    if len(content) > max_content_size:
+                        content = (
+                            content[:max_content_size]
+                            + "\n\n[CONTENT TRUNCATED DUE TO SIZE]"
+                        )
+                        logger.info(
+                            f"Truncated content for {url} from {len(response.text)} to {len(content)} bytes"
+                        )
+
                     logger.info(
-                        f"Successfully fetched {url} - Status: {response.status_code}, Size: {len(response.text)} bytes"
+                        f"Successfully fetched {url} - Status: {response.status_code}, Size: {len(content)} bytes"
                     )
 
                     snapshot_data = {
-                        "html_content": response.text,
+                        "html_content": content,
                         "status_code": response.status_code,
                         "response_time_ms": response_time_ms,
                         "url_used": url,
@@ -302,6 +383,26 @@ def capture_domain_snapshot(self, domain_id, record_log_id=None, is_initial=Fals
 
         # Create snapshot record
         if snapshot_data:
+            # Check if we should really save this snapshot to reduce disk usage
+            # Skip snapshots if we already have a recent one for this domain (within 1 hour)
+            if not is_initial:
+                recent_snapshot = DomainSnapshot.objects.filter(
+                    domain=domain,
+                    timestamp__gte=timezone.now() - timezone.timedelta(hours=1),
+                ).first()
+
+                if recent_snapshot:
+                    logger.info(
+                        f"Skipping duplicate snapshot for {domain.name} - recent one exists"
+                    )
+                    return {
+                        "success": True,
+                        "domain": domain.name,
+                        "skipped": True,
+                        "reason": "Recent snapshot exists",
+                        "url_used": snapshot_data["url_used"],
+                    }
+
             # Success - save the snapshot
             snapshot = DomainSnapshot.objects.create(
                 domain=domain,
@@ -760,8 +861,8 @@ def check_all_domains_now():
 @shared_task(bind=True)
 def start_continuous_monitoring(self):
     """
-    Start continuous monitoring loop.
-    This task continuously checks domains with rate limiting.
+    Start continuous monitoring loop with improved rate limiting and batching.
+    This task continuously checks domains with smart batching to reduce load.
     """
     try:
         from .models import MonitorSettings
@@ -787,27 +888,49 @@ def start_continuous_monitoring(self):
         )
 
         if checkable_domains:
-            # Check domains in parallel respecting max_parallel_checks
-            batch_size = min(settings.max_parallel_checks, len(checkable_domains))
+            # Improved batching: smaller batches with staggered processing
+            # This reduces peak load and spreads work over time
+            batch_size = max(
+                1, min(settings.max_parallel_checks // 4, 25)
+            )  # Smaller batches
             batches = [
                 checkable_domains[i : i + batch_size]
                 for i in range(0, len(checkable_domains), batch_size)
             ]
 
-            for batch in batches:
+            total_batches = len(batches)
+            for idx, batch in enumerate(batches):
                 # Process each domain in the batch
                 for domain in batch:
                     check_domain_a_records.delay(domain.id)
-                logger.info(f"Queued batch of {len(batch)} domains")
+
+                logger.info(
+                    f"Queued batch {idx+1}/{total_batches} with {len(batch)} domains"
+                )
+
+                # Add staggered delays between batches to reduce server load spikes
+                # Only add delays between batches, not after the last one
+                if idx < total_batches - 1:
+                    time.sleep(0.5)  # Small delay between batches
+        else:
+            logger.debug("No domains ready for checking due to rate limiting")
 
         # Check if continuous monitoring is still enabled before scheduling next cycle
         settings.refresh_from_db()
         if settings.continuous_monitoring_enabled:
-            # Schedule the next cycle immediately
-            logger.info("Scheduling next continuous monitoring cycle")
-            start_continuous_monitoring.apply_async(
-                countdown=5
-            )  # Small delay to avoid overwhelming
+            # Adaptive delay: longer delay when fewer domains are being processed
+            # This helps prevent overwhelming the system when most domains are rate-limited
+            if len(checkable_domains) == 0:
+                delay = 30  # Longer delay when no work to do
+            elif len(checkable_domains) < 100:
+                delay = 15  # Medium delay for light load
+            else:
+                delay = 5  # Short delay for heavy load (original behavior)
+
+            logger.info(
+                f"Scheduling next continuous monitoring cycle in {delay} seconds"
+            )
+            start_continuous_monitoring.apply_async(countdown=delay)
         else:
             logger.info("Continuous monitoring disabled, not scheduling next cycle")
 
@@ -815,6 +938,7 @@ def start_continuous_monitoring(self):
             "message": "Continuous monitoring cycle completed",
             "domains_checked": len(checkable_domains),
             "total_active_domains": len(domains_to_check),
+            "batches_processed": len(batches) if checkable_domains else 0,
             "timestamp": timezone.now().isoformat(),
         }
 
@@ -882,3 +1006,156 @@ def check_domains_with_rate_limiting(self):
     except Exception as e:
         logger.error(f"Error in rate-limited domain check: {str(e)}")
         raise
+
+
+@shared_task(bind=True)
+def cleanup_no_change_logs_background(self, days=1, batch_size=1000, keep_errors=True):
+    """
+    Background task to clean up RecordLog entries with no changes.
+
+    This runs as a Celery task to avoid blocking the main application
+    when cleaning up large amounts of data.
+
+    Args:
+        days (int): Only clean records older than this many days
+        batch_size (int): Number of records to process per batch
+        keep_errors (bool): Whether to preserve error records
+
+    Returns:
+        dict: Result summary with deletion statistics
+    """
+    import time
+    from datetime import timedelta
+
+    from django.db import transaction
+
+    try:
+        logger.info(
+            f"Starting background cleanup of no-change logs (days={days}, batch_size={batch_size})"
+        )
+
+        # Calculate cutoff date
+        cutoff_date = timezone.now() - timedelta(days=days)
+
+        # Build the query for records to delete
+        base_query = RecordLog.objects.filter(
+            is_change=False, timestamp__lt=cutoff_date
+        )
+
+        if keep_errors:
+            base_query = base_query.filter(error_message__isnull=True)
+
+        # Get total count before starting
+        total_count = base_query.count()
+        logger.info(f"Found {total_count} records to clean up")
+
+        if total_count == 0:
+            return {
+                "success": True,
+                "message": "No records to clean up",
+                "deleted_count": 0,
+                "total_found": 0,
+                "batches_processed": 0,
+            }
+
+        # Preserve most recent entry per domain to maintain consistency
+        preserved_ids = []
+        domains = Domain.objects.all()
+
+        for domain in domains:
+            most_recent = (
+                RecordLog.objects.filter(
+                    domain=domain,
+                    is_change=False,
+                    error_message__isnull=True if keep_errors else None,
+                )
+                .order_by("-timestamp")
+                .first()
+            )
+
+            if most_recent:
+                preserved_ids.append(most_recent.pk)
+
+        logger.info(f"Preserving {len(preserved_ids)} most recent entries per domain")
+
+        # Final query excluding preserved records
+        records_to_delete = base_query.exclude(id__in=preserved_ids)
+        final_delete_count = records_to_delete.count()
+
+        logger.info(f"Will delete {final_delete_count} records after preservation")
+
+        # Delete in batches with progress tracking
+        deleted_count = 0
+        batch_count = 0
+        start_time = time.time()
+
+        while True:
+            batch_count += 1
+
+            # Update task progress
+            if hasattr(self, "update_state"):
+                self.update_state(
+                    state="PROGRESS",
+                    meta={
+                        "current": deleted_count,
+                        "total": final_delete_count,
+                        "batch": batch_count,
+                        "percentage": (
+                            int((deleted_count / final_delete_count) * 100)
+                            if final_delete_count > 0
+                            else 0
+                        ),
+                    },
+                )
+
+            with transaction.atomic():
+                # Get batch of IDs to delete
+                batch_ids = list(
+                    records_to_delete.values_list("id", flat=True)[:batch_size]
+                )
+
+                if not batch_ids:
+                    break
+
+                # Delete the batch
+                batch_deleted, _ = RecordLog.objects.filter(id__in=batch_ids).delete()
+                deleted_count += batch_deleted
+
+                logger.info(
+                    f"Batch {batch_count}: Deleted {batch_deleted} records ({deleted_count}/{final_delete_count})"
+                )
+
+                # Small delay to prevent overwhelming the database
+                time.sleep(0.1)
+
+                # Every 10 batches, take a longer break to allow other operations
+                if batch_count % 10 == 0:
+                    time.sleep(1)
+
+        elapsed_time = time.time() - start_time
+
+        logger.info(
+            f"Background cleanup completed: {deleted_count} records deleted in "
+            f"{batch_count} batches over {elapsed_time:.1f} seconds"
+        )
+
+        return {
+            "success": True,
+            "message": f"Successfully deleted {deleted_count} no-change records",
+            "deleted_count": deleted_count,
+            "total_found": total_count,
+            "preserved_count": len(preserved_ids),
+            "batches_processed": batch_count,
+            "elapsed_seconds": elapsed_time,
+            "records_per_second": (
+                deleted_count / elapsed_time if elapsed_time > 0 else 0
+            ),
+        }
+
+    except Exception as e:
+        logger.error(f"Error in background cleanup: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "deleted_count": deleted_count if "deleted_count" in locals() else 0,
+        }
