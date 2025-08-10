@@ -5,6 +5,9 @@ Optimized for fast test execution with in-memory database.
 
 from .settings import *  # noqa: F403,F401
 
+# Disable Sentry for tests to avoid noise and external dependencies
+SENTRY_DSN = ""
+
 # Database configuration for tests
 DATABASES = {
     "default": {

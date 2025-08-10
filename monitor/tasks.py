@@ -7,6 +7,9 @@ from celery import shared_task
 from django.utils import timezone
 from ipwhois import IPWhois
 
+# Import Sentry logger for structured logging
+from sentry_sdk import logger as sentry_logger
+
 from .models import Domain, DomainSnapshot, IPWhoisInfo, RecordLog, RecordLogIPInfo
 
 logger = logging.getLogger("monitor")
@@ -48,6 +51,18 @@ def check_domain_a_records(self, domain_id):
             answers = resolver.resolve(domain.name, "A")
             current_ips = [str(answer) for answer in answers]
             logger.info(f"Found IPs for {domain.name}: {current_ips}")
+
+            # Example: Sentry structured logging for successful DNS resolution
+            sentry_logger.info(
+                "DNS A records resolved successfully for domain {domain_name}",
+                domain_name=domain.name,
+                attributes={
+                    "domain_id": domain_id,
+                    "ip_count": len(current_ips),
+                    "resolved_ips": current_ips,
+                    "dns_resolver_timeout": settings.dns_timeout_seconds,
+                },
+            )
 
             # Sort IPs for consistent comparison
             current_ips_sorted = sorted(set(current_ips))
@@ -117,6 +132,17 @@ def check_domain_a_records(self, domain_id):
         except dns.resolver.NXDOMAIN:
             error_msg = f"Domain {domain.name} does not exist (NXDOMAIN)"
             logger.error(error_msg)
+
+            # Example: Sentry structured logging with attributes
+            sentry_logger.error(
+                "DNS resolution failed: domain does not exist",
+                attributes={
+                    "domain_name": domain.name,
+                    "domain_id": domain_id,
+                    "error_type": "NXDOMAIN",
+                    "dns_check_type": "A_records",
+                },
+            )
 
             # Log the error
             RecordLog.objects.create(

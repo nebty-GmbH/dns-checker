@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import logging
 from pathlib import Path
 from typing import cast
 
@@ -17,6 +18,9 @@ import dj_database_url
 import sentry_sdk
 from celery.schedules import crontab
 from decouple import config
+from sentry_sdk.integrations.celery import CeleryIntegration
+from sentry_sdk.integrations.django import DjangoIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -244,8 +248,95 @@ if not DEBUG:
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Sentry configuration
-sentry_sdk.init(
-    dsn="https://77dab0fb5a4c48aed15186c22ef0176f@o4507731323650048.ingest.de.sentry.io/4509814199353424",
-    send_default_pii=True,
+# Sentry configuration (Error monitoring + Structured Logs)
+# Configure via environment variables to avoid hard-coding secrets.
+SENTRY_DSN = cast(str, config("SENTRY_DSN", default="", cast=str))
+SENTRY_ENVIRONMENT = cast(
+    str,
+    config(
+        "SENTRY_ENVIRONMENT",
+        default=("development" if DEBUG else "production"),
+        cast=str,
+    ),
 )
+
+if SENTRY_DSN:
+    # Configure thresholds via environment variables (optional)
+    # SENTRY_LOG_LEVEL controls Python logging level captured as breadcrumbs/events
+    # SENTRY_EVENT_LEVEL controls level that is sent as error events
+    SENTRY_LOG_LEVEL_STR = cast(
+        str, config("SENTRY_LOG_LEVEL", default="INFO", cast=str)
+    ).upper()
+    SENTRY_EVENT_LEVEL_STR = cast(
+        str, config("SENTRY_EVENT_LEVEL", default="ERROR", cast=str)
+    ).upper()
+
+    LOG_LEVEL_MAP = {
+        "TRACE": 5,  # custom lower than DEBUG if used
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+        "FATAL": logging.FATAL,
+        "CRITICAL": logging.CRITICAL,
+    }
+
+    # Configure LoggingIntegration for structured logs
+    sentry_logging = LoggingIntegration(
+        level=LOG_LEVEL_MAP.get(
+            SENTRY_LOG_LEVEL_STR, logging.INFO
+        ),  # What gets captured as breadcrumbs
+        event_level=LOG_LEVEL_MAP.get(
+            SENTRY_EVENT_LEVEL_STR, logging.ERROR
+        ),  # What gets sent as events
+        sentry_logs_level=LOG_LEVEL_MAP.get(
+            SENTRY_LOG_LEVEL_STR, logging.INFO
+        ),  # What gets sent to Sentry Logs
+    )
+
+    # Structured Logs (Sentry Logs beta) - enable via experiment flag
+    ENABLE_SENTRY_LOGS = cast(
+        bool, config("SENTRY_ENABLE_LOGS", default=True, cast=bool)
+    )
+
+    # Optional: Custom log filtering function
+    def before_send_log(log, hint):
+        """
+        Filter or modify logs before sending to Sentry.
+        Return None to discard the log, or return the modified log.
+        """
+        # Example: Filter out health check logs
+        if "health" in log.get("body", "").lower():
+            return None
+
+        # Example: Add custom attributes
+        if log.get("severity_text") == "error":
+            log.setdefault("attributes", {})["team"] = "dns-monitoring"
+
+        return log
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[
+            DjangoIntegration(
+                transaction_style="url",  # Track transactions by URL
+                middleware_spans=True,  # Create spans for middleware
+                signals_spans=True,  # Create spans for Django signals
+            ),
+            CeleryIntegration(
+                monitor_beat_tasks=True,  # Monitor Celery beat tasks
+                propagate_traces=True,  # Propagate traces from web to tasks
+            ),
+            sentry_logging,
+        ],
+        send_default_pii=True,  # Include user information
+        environment=SENTRY_ENVIRONMENT,
+        # Enable experimental features
+        _experiments={
+            "enable_logs": ENABLE_SENTRY_LOGS,
+            "before_send_log": before_send_log if ENABLE_SENTRY_LOGS else None,
+        },
+        # Performance monitoring
+        traces_sample_rate=0.1,  # 10% of transactions for performance monitoring
+        profiles_sample_rate=0.1,  # 10% for profiling
+    )

@@ -11,7 +11,7 @@ djangorestframework>=3.14.0
 django-celery-beat>=2.5.0
 requests>=2.31.0
 ipwhois>=1.2.0
-sentry-sdk[django]>=2.0.0
+sentry-sdk[django,celery]>=2.28.0
 
 # Testing dependencies
 pytest>=7.4.0
