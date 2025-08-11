@@ -81,6 +81,7 @@ def enhanced_domain_dashboard(request):
     activity_filter = request.GET.get("activity", "all")
     change_filter = request.GET.get("changes", "all")
     organization_filter = request.GET.get("organization", "all")
+    ips_filter = request.GET.get("ips", "all")
     sort_by = request.GET.get("sort", "updated_at")
     sort_order = request.GET.get("order", "desc")
 
@@ -112,6 +113,16 @@ def enhanced_domain_dashboard(request):
         domains = domains.filter(
             record_logs__ip_info_entries__ip_whois_info__organization__icontains=organization_filter
         ).distinct()
+
+    # Filter by IPs
+    if ips_filter == "with_ips":
+        domains = domains.exclude(
+            Q(last_known_ips__isnull=True) | Q(last_known_ips__exact="")
+        )
+    elif ips_filter == "without_ips":
+        domains = domains.filter(
+            Q(last_known_ips__isnull=True) | Q(last_known_ips__exact="")
+        )
 
     # Apply sorting
     valid_sort_fields = {
@@ -196,6 +207,7 @@ def enhanced_domain_dashboard(request):
         "activity_filter": activity_filter,
         "change_filter": change_filter,
         "organization_filter": organization_filter,
+        "ips_filter": ips_filter,
         "organizations": organizations,
         "sort_by": sort_by,
         "sort_order": sort_order,
@@ -212,6 +224,7 @@ def enhanced_domain_dashboard(request):
                 activity_filter != "all",
                 change_filter != "all",
                 organization_filter != "all",
+                ips_filter != "all",
             ]
         ),
     }

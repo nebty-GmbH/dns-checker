@@ -351,6 +351,15 @@
                 </div>
 
                 <div class="filter-group">
+                    <label for="ips">Known IPs</label>
+                    <select id="ips" name="ips">
+                        <option value="all" {% if ips_filter == 'all' %}selected{% endif %}>All Domains</option>
+                        <option value="with_ips" {% if ips_filter == 'with_ips' %}selected{% endif %}>With Known IPs</option>
+                        <option value="without_ips" {% if ips_filter == 'without_ips' %}selected{% endif %}>Without Known IPs</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
                     <button type="submit" class="btn btn-primary">Apply Filters</button>
                 </div>
             </div>
