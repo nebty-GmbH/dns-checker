@@ -571,23 +571,95 @@ def fetch_ip_whois_info(self, ip_address):
         if "asn_description" in result and result["asn_description"]:
             whois_data["asn_description"] = result["asn_description"]
 
-        # Extract network information
+        # Extract network information (handle both RDAP and traditional WHOIS formats)
+
+        # First try RDAP format
+        if "network" in result and result["network"]:
+            network = result["network"]
+
+            # Get organization from network name or from objects
+            if "name" in network and network["name"]:
+                whois_data["organization"] = network["name"]
+
+            # Get country from network
+            if "country" in network and network["country"]:
+                whois_data["country"] = network["country"]
+
+            # Get CIDR from network
+            if "cidr" in network and network["cidr"]:
+                whois_data["network_cidr"] = network["cidr"]
+
+        # Try to get organization name from RDAP objects
+        if (
+            "objects" in result
+            and result["objects"]
+            and isinstance(result["objects"], dict)
+        ):
+            for obj_key, obj_data in result["objects"].items():
+                if isinstance(obj_data, dict) and "contact" in obj_data:
+                    contact = obj_data["contact"]
+                    if (
+                        isinstance(contact, dict)
+                        and "name" in contact
+                        and contact["name"]
+                    ):
+                        # Prefer organization kind contacts
+                        if (
+                            contact.get("kind") == "org"
+                            or not whois_data["organization"]
+                        ):
+                            whois_data["organization"] = contact["name"]
+
+                        # Also use as ISP if not already set
+                        if not whois_data["isp"]:
+                            whois_data["isp"] = contact["name"]
+
+                    # Extract country from address if available
+                    if (
+                        isinstance(contact, dict)
+                        and "address" in contact
+                        and contact["address"]
+                    ):
+                        for addr in contact["address"]:
+                            if isinstance(addr, dict) and "value" in addr:
+                                # Parse country from address (usually last line)
+                                addr_lines = addr["value"].strip().split("\n")
+                                if len(addr_lines) >= 2:
+                                    potential_country = addr_lines[-1].strip()
+                                    # Common country names to look for
+                                    if (
+                                        potential_country
+                                        in [
+                                            "United States",
+                                            "US",
+                                            "Canada",
+                                            "Germany",
+                                            "France",
+                                            "United Kingdom",
+                                            "UK",
+                                        ]
+                                        and not whois_data["country"]
+                                    ):
+                                        whois_data["country"] = potential_country
+
+        # Fallback to traditional WHOIS format
         if "nets" in result and result["nets"]:
             net = result["nets"][0]  # Use the first network entry
 
-            if "name" in net and net["name"]:
+            if "name" in net and net["name"] and not whois_data["organization"]:
                 whois_data["organization"] = net["name"]
 
             if "description" in net and net["description"]:
                 # Sometimes description contains ISP info
                 if not whois_data["organization"] and net["description"]:
                     whois_data["organization"] = net["description"]
-                whois_data["isp"] = net["description"]
+                if not whois_data["isp"]:
+                    whois_data["isp"] = net["description"]
 
-            if "country" in net and net["country"]:
+            if "country" in net and net["country"] and not whois_data["country"]:
                 whois_data["country"] = net["country"]
 
-            if "cidr" in net and net["cidr"]:
+            if "cidr" in net and net["cidr"] and not whois_data["network_cidr"]:
                 whois_data["network_cidr"] = net["cidr"]
 
         # Extract registry information
