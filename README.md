@@ -34,6 +34,17 @@ A Django web application that automatically monitors DNS A-record changes for a 
 
 3. **Deployment Checklist:** Use the [Deployment Checklist](docs/DEPLOYMENT_CHECKLIST.md)
 
+#### ARM64 Server Notes
+
+**Important for ARM64 servers (e.g., Hetzner ARM instances):**
+
+Dokku on ARM64 platforms uses Cloud Native Buildpacks (CNB) instead of the traditional herokuish builder. This affects how you run commands:
+
+- **Regular command**: `dokku run dns-checker python manage.py migrate`
+- **ARM64/CNB command**: `docker exec dns-checker.web.1 /cnb/lifecycle/launcher python manage.py migrate`
+
+The CNB environment requires the `/cnb/lifecycle/launcher` prefix for proper Python environment setup. This is normal behavior and not an error.
+
 ### Local Development
 
 1. **Setup the project:**

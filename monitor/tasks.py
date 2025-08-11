@@ -384,22 +384,45 @@ def capture_domain_snapshot(self, domain_id, record_log_id=None, is_initial=Fals
         # Create snapshot record
         if snapshot_data:
             # Check if we should really save this snapshot to reduce disk usage
-            # Skip snapshots if we already have a recent one for this domain (within 1 hour)
+            # Skip snapshots if we already have a recent one of the SAME TYPE for this domain
             if not is_initial:
-                recent_snapshot = DomainSnapshot.objects.filter(
+                # For change snapshots, only check for recent change snapshots with shorter timeout (15 minutes)
+                # We want to capture change snapshots quickly, so shorter deduplication window
+                recent_change_snapshot = DomainSnapshot.objects.filter(
                     domain=domain,
-                    timestamp__gte=timezone.now() - timezone.timedelta(hours=1),
+                    is_initial_snapshot=False,  # Only check change snapshots
+                    timestamp__gte=timezone.now()
+                    - timezone.timedelta(minutes=15),  # 15 minutes for changes
                 ).first()
 
-                if recent_snapshot:
+                if recent_change_snapshot:
                     logger.info(
-                        f"Skipping duplicate snapshot for {domain.name} - recent one exists"
+                        f"Skipping duplicate change snapshot for {domain.name} - recent change snapshot exists (within 15 min)"
                     )
                     return {
                         "success": True,
                         "domain": domain.name,
                         "skipped": True,
-                        "reason": "Recent snapshot exists",
+                        "reason": "Recent change snapshot exists",
+                        "url_used": snapshot_data["url_used"],
+                    }
+            else:
+                # For initial snapshots, check for recent initial snapshots (1 hour is fine)
+                recent_initial_snapshot = DomainSnapshot.objects.filter(
+                    domain=domain,
+                    is_initial_snapshot=True,  # Only check initial snapshots
+                    timestamp__gte=timezone.now() - timezone.timedelta(hours=1),
+                ).first()
+
+                if recent_initial_snapshot:
+                    logger.info(
+                        f"Skipping duplicate initial snapshot for {domain.name} - recent initial snapshot exists"
+                    )
+                    return {
+                        "success": True,
+                        "domain": domain.name,
+                        "skipped": True,
+                        "reason": "Recent initial snapshot exists",
                         "url_used": snapshot_data["url_used"],
                     }
 
