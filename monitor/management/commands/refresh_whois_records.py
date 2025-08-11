@@ -44,6 +44,11 @@ class Command(BaseCommand):
             type=int,
             help="Maximum number of records to process (useful for testing)",
         )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Skip confirmation prompt and proceed automatically",
+        )
 
     def handle(self, *args, **options):
         self.stdout.write("=== WHOIS Records Refresh Command ===")
@@ -97,11 +102,12 @@ class Command(BaseCommand):
             self.stdout.write(f"  ... and {total_count - 5} more")
 
         if not options["dry_run"]:
-            # Confirm before proceeding
-            confirm = input(f"\nProceed to update {process_count} records? [y/N]: ")
-            if confirm.lower() != "y":
-                self.stdout.write("Operation cancelled.")
-                return
+            # Confirm before proceeding (unless --force is used)
+            if not options["force"]:
+                confirm = input(f"\nProceed to update {process_count} records? [y/N]: ")
+                if confirm.lower() != "y":
+                    self.stdout.write("Operation cancelled.")
+                    return
 
         # Process records
         self.stdout.write("\nStarting WHOIS refresh...")
