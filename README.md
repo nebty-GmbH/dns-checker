@@ -36,7 +36,9 @@ A Django web application that automatically monitors DNS A-record changes for a 
 
 #### ARM64 Server Notes
 
-**Important for ARM64 servers (e.g., Hetzner ARM instances):**
+
+
+**Important! We use ARM64 on prod. For ARM64 servers:**
 
 Dokku on ARM64 platforms uses Cloud Native Buildpacks (CNB) instead of the traditional herokuish builder. This affects how you run commands:
 
