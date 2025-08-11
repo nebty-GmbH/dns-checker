@@ -225,6 +225,24 @@
     display: block;
 }
 
+.organization-info {
+    color: #6c757d;
+    font-size: 13px;
+}
+
+.sortable-header {
+    color: #495057;
+    text-decoration: none;
+    display: block;
+    padding: 2px 4px;
+    transition: color 0.2s;
+}
+
+.sortable-header:hover {
+    color: #007bff;
+    text-decoration: none;
+}
+
 .pagination {
     display: flex;
     justify-content: center;
@@ -263,7 +281,7 @@
 {% block content %}
 <div class="domain-dashboard">
     <h1>{{ title }}</h1>
-    
+
     <!-- Summary Statistics -->
     <div class="stats-row">
         <div class="stat-card">
@@ -283,17 +301,17 @@
             <div class="stat-label">Checks Today</div>
         </div>
     </div>
-    
+
     <!-- Filters -->
     <div class="filters-section">
         <form method="get" id="filter-form">
             <div class="filter-row">
                 <div class="filter-group">
                     <label for="search">Search</label>
-                    <input type="text" id="search" name="search" value="{{ search_query }}" 
+                    <input type="text" id="search" name="search" value="{{ search_query }}"
                            placeholder="Domain name or IP...">
                 </div>
-                
+
                 <div class="filter-group">
                     <label for="status">Status</label>
                     <select id="status" name="status">
@@ -302,7 +320,7 @@
                         <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
                     </select>
                 </div>
-                
+
                 <div class="filter-group">
                     <label for="activity">Activity</label>
                     <select id="activity" name="activity">
@@ -311,7 +329,7 @@
                         <option value="stale" {% if activity_filter == 'stale' %}selected{% endif %}>Stale (>7 days)</option>
                     </select>
                 </div>
-                
+
                 <div class="filter-group">
                     <label for="changes">Changes</label>
                     <select id="changes" name="changes">
@@ -321,12 +339,22 @@
                         <option value="suspicious" {% if change_filter == 'suspicious' %}selected{% endif %}>Suspicious (>2 changes)</option>
                     </select>
                 </div>
-                
+
+                <div class="filter-group">
+                    <label for="organization">Organization</label>
+                    <select id="organization" name="organization">
+                        <option value="all" {% if organization_filter == 'all' %}selected{% endif %}>All Organizations</option>
+                        {% for org in organizations %}
+                        <option value="{{ org }}" {% if organization_filter == org %}selected{% endif %}>{{ org }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
                 <div class="filter-group">
                     <button type="submit" class="btn btn-primary">Apply Filters</button>
                 </div>
             </div>
-            
+
             {% if has_filters %}
             <div style="margin-top: 10px;">
                 <a href="?" class="clear-filters">Clear all filters</a>
@@ -334,7 +362,7 @@
             {% endif %}
         </form>
     </div>
-    
+
     <!-- Bulk Actions -->
     <div id="bulk-actions" class="bulk-actions">
         <strong>Bulk Actions:</strong>
@@ -344,7 +372,7 @@
         <button type="button" class="btn btn-danger" onclick="exportSelected()">Export Selected</button>
         <span id="bulk-count">0 domains selected</span>
     </div>
-    
+
     <!-- Domains Table -->
     <div class="domains-table">
         <table>
@@ -353,13 +381,57 @@
                     <th width="30">
                         <input type="checkbox" id="select-all" onchange="toggleSelectAll()">
                     </th>
-                    <th>Domain</th>
+                    <th>
+                        <a href="?{% for key, value in request.GET.items %}{% if key != 'sort' and key != 'order' %}{{ key }}={{ value }}&{% endif %}{% endfor %}sort=name&order={% if sort_by == 'name' and sort_order == 'asc' %}desc{% else %}asc{% endif %}" class="sortable-header">
+                            Domain
+                            {% if sort_by == 'name' %}
+                                {% if sort_order == 'asc' %}↑{% else %}↓{% endif %}
+                            {% endif %}
+                        </a>
+                    </th>
                     <th>Status</th>
                     <th>Last Known IPs</th>
-                    <th>Checks</th>
-                    <th>Changes</th>
-                    <th>Recent Activity</th>
-                    <th>Last Updated</th>
+                    <th>Organization</th>
+                    <th>
+                        <a href="?{% for key, value in request.GET.items %}{% if key != 'sort' and key != 'order' %}{{ key }}={{ value }}&{% endif %}{% endfor %}sort=total_checks&order={% if sort_by == 'total_checks' and sort_order == 'asc' %}desc{% else %}asc{% endif %}" class="sortable-header">
+                            Checks
+                            {% if sort_by == 'total_checks' %}
+                                {% if sort_order == 'asc' %}↑{% else %}↓{% endif %}
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="?{% for key, value in request.GET.items %}{% if key != 'sort' and key != 'order' %}{{ key }}={{ value }}&{% endif %}{% endfor %}sort=total_changes&order={% if sort_by == 'total_changes' and sort_order == 'asc' %}desc{% else %}asc{% endif %}" class="sortable-header">
+                            Changes
+                            {% if sort_by == 'total_changes' %}
+                                {% if sort_order == 'asc' %}↑{% else %}↓{% endif %}
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="?{% for key, value in request.GET.items %}{% if key != 'sort' and key != 'order' %}{{ key }}={{ value }}&{% endif %}{% endfor %}sort=recent_changes&order={% if sort_by == 'recent_changes' and sort_order == 'asc' %}desc{% else %}asc{% endif %}" class="sortable-header">
+                            Recent Activity
+                            {% if sort_by == 'recent_changes' %}
+                                {% if sort_order == 'asc' %}↑{% else %}↓{% endif %}
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="?{% for key, value in request.GET.items %}{% if key != 'sort' and key != 'order' %}{{ key }}={{ value }}&{% endif %}{% endfor %}sort=created_at&order={% if sort_by == 'created_at' and sort_order == 'asc' %}desc{% else %}asc{% endif %}" class="sortable-header">
+                            Date Added
+                            {% if sort_by == 'created_at' %}
+                                {% if sort_order == 'asc' %}↑{% else %}↓{% endif %}
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="?{% for key, value in request.GET.items %}{% if key != 'sort' and key != 'order' %}{{ key }}={{ value }}&{% endif %}{% endfor %}sort=updated_at&order={% if sort_by == 'updated_at' and sort_order == 'asc' %}desc{% else %}asc{% endif %}" class="sortable-header">
+                            Last Updated
+                            {% if sort_by == 'updated_at' %}
+                                {% if sort_order == 'asc' %}↑{% else %}↓{% endif %}
+                            {% endif %}
+                        </a>
+                    </th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -367,7 +439,7 @@
                 {% for domain in domains %}
                 <tr>
                     <td>
-                        <input type="checkbox" class="domain-checkbox" value="{{ domain.id }}" 
+                        <input type="checkbox" class="domain-checkbox" value="{{ domain.id }}"
                                onchange="updateBulkActions()">
                     </td>
                     <td>
@@ -383,6 +455,11 @@
                     <td>
                         <span class="ips-list" title="{{ domain.last_known_ips|default:'None' }}">
                             {{ domain.last_known_ips|default:'None'|truncatechars:20 }}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="organization-info" title="{{ domain.latest_organization|default:'Unknown' }}">
+                            {{ domain.latest_organization|default:'Unknown'|truncatechars:25 }}
                         </span>
                     </td>
                     <td>
@@ -411,11 +488,12 @@
                             Stable
                         </span>
                         {% endif %}
-                        
+
                         {% if domain.last_7_days_checks %}
                         <div class="metric-small">{{ domain.last_7_days_checks }} checks (7d)</div>
                         {% endif %}
                     </td>
+                    <td>{{ domain.created_at|date:"M d, Y H:i" }}</td>
                     <td>{{ domain.updated_at|date:"M d, H:i" }}</td>
                     <td>
                         <a href="{% url 'admin:monitor_domain_timeline' domain.id %}" class="btn btn-primary" style="font-size: 12px;">
@@ -425,7 +503,7 @@
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="9" style="text-align: center; padding: 40px; color: #6c757d;">
+                    <td colspan="11" style="text-align: center; padding: 40px; color: #6c757d;">
                         {% if has_filters %}
                         No domains match the current filters.
                         {% else %}
@@ -437,18 +515,18 @@
             </tbody>
         </table>
     </div>
-    
+
     <!-- Pagination -->
     {% if domains.has_other_pages %}
     <div class="pagination">
         {% if domains.has_previous %}
             <a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ domains.previous_page_number }}">« Previous</a>
         {% endif %}
-        
+
         <span class="current">
             Page {{ domains.number }} of {{ domains.paginator.num_pages }}
         </span>
-        
+
         {% if domains.has_next %}
             <a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ domains.next_page_number }}">Next »</a>
         {% endif %}
@@ -468,7 +546,7 @@ function updateBulkActions() {
     const checkboxes = document.querySelectorAll('.domain-checkbox:checked');
     const bulkActions = document.getElementById('bulk-actions');
     const bulkCount = document.getElementById('bulk-count');
-    
+
     if (checkboxes.length > 0) {
         bulkActions.classList.add('show');
         bulkCount.textContent = `${checkboxes.length} domains selected`;
@@ -488,20 +566,20 @@ function bulkAction(action) {
         alert('Please select at least one domain.');
         return;
     }
-    
+
     if (!confirm(`Are you sure you want to ${action} ${domainIds.length} domains?`)) {
         return;
     }
-    
+
     const formData = new FormData();
     formData.append('action', action);
     domainIds.forEach(id => formData.append('domain_ids', id));
-    
+
     fetch('{% url "admin:monitor_bulk_domain_actions" %}', {
         method: 'POST',
         body: formData,
         headers: {
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value || 
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]')?.value ||
                           document.querySelector('meta[name=csrf-token]')?.content
         }
     })
@@ -526,7 +604,7 @@ function exportSelected() {
         alert('Please select at least one domain.');
         return;
     }
-    
+
     const params = domainIds.map(id => `domain_ids=${id}`).join('&');
     window.open(`{% url "admin:monitor_domain_export" %}?${params}&format=json`);
 }

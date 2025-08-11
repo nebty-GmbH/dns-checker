@@ -12,7 +12,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 
-from .models import Domain, DomainSnapshot, RecordLog
+from .models import Domain, DomainSnapshot, IPWhoisInfo, RecordLog
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +75,14 @@ def enhanced_domain_dashboard(request):
         ),
     ).order_by("-updated_at")
 
-    # Apply filters
+    # Apply filters and sorting
     search_query = request.GET.get("search", "")
     status_filter = request.GET.get("status", "all")
     activity_filter = request.GET.get("activity", "all")
     change_filter = request.GET.get("changes", "all")
+    organization_filter = request.GET.get("organization", "all")
+    sort_by = request.GET.get("sort", "updated_at")
+    sort_order = request.GET.get("order", "desc")
 
     if search_query:
         domains = domains.filter(
@@ -104,10 +107,71 @@ def enhanced_domain_dashboard(request):
         # More than 2 changes in last 7 days could be suspicious
         domains = domains.filter(recent_changes__gt=2)
 
+    # Filter by organization
+    if organization_filter and organization_filter != "all":
+        domains = domains.filter(
+            record_logs__ip_info_entries__ip_whois_info__organization__icontains=organization_filter
+        ).distinct()
+
+    # Apply sorting
+    valid_sort_fields = {
+        "name": "name",
+        "created_at": "created_at",
+        "updated_at": "updated_at",
+        "last_change_date": "last_change_date",
+        "total_checks": "total_checks",
+        "total_changes": "total_changes",
+        "recent_changes": "recent_changes",
+    }
+
+    if sort_by in valid_sort_fields:
+        sort_field = valid_sort_fields[sort_by]
+        if sort_order == "desc":
+            sort_field = f"-{sort_field}"
+        domains = domains.order_by(sort_field)
+    else:
+        # Default sorting by updated_at descending
+        domains = domains.order_by("-updated_at")
+
     # Pagination
     paginator = Paginator(domains, 25)
     page_number = request.GET.get("page", 1)
     page_obj = paginator.get_page(page_number)
+
+    # Add organization data to each domain
+    for domain in page_obj:
+        # Get the most recent organization from WHOIS data
+        latest_org = None
+        try:
+            latest_record = domain.record_logs.filter(
+                ip_info_entries__ip_whois_info__organization__isnull=False
+            ).first()
+
+            if latest_record:
+                # Get the most common organization from the latest record's IP info
+                org_info = (
+                    latest_record.ip_info_entries.filter(
+                        ip_whois_info__organization__isnull=False
+                    )
+                    .select_related("ip_whois_info")
+                    .first()
+                )
+                if org_info and org_info.ip_whois_info:
+                    latest_org = org_info.ip_whois_info.organization
+        except Exception:
+            # Handle any relation issues gracefully
+            pass
+
+        domain.latest_organization = latest_org
+
+    # Get list of organizations for filter dropdown
+    organizations = (
+        IPWhoisInfo.objects.exclude(organization__isnull=True)
+        .exclude(organization__exact="")
+        .values_list("organization", flat=True)
+        .distinct()
+        .order_by("organization")[:50]
+    )
 
     # Summary statistics
     total_domains = Domain.objects.count()
@@ -131,6 +195,10 @@ def enhanced_domain_dashboard(request):
         "status_filter": status_filter,
         "activity_filter": activity_filter,
         "change_filter": change_filter,
+        "organization_filter": organization_filter,
+        "organizations": organizations,
+        "sort_by": sort_by,
+        "sort_order": sort_order,
         "summary_stats": {
             "total_domains": total_domains,
             "active_domains": active_domains,
@@ -143,6 +211,7 @@ def enhanced_domain_dashboard(request):
                 status_filter != "all",
                 activity_filter != "all",
                 change_filter != "all",
+                organization_filter != "all",
             ]
         ),
     }
