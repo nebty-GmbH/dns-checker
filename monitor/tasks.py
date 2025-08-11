@@ -487,12 +487,13 @@ def capture_domain_snapshot(self, domain_id, record_log_id=None, is_initial=Fals
     autoretry_for=(Exception,),
     retry_kwargs={"max_retries": 3, "countdown": 180},
 )
-def fetch_ip_whois_info(self, ip_address):
+def fetch_ip_whois_info(self, ip_address, force_refresh=False):
     """
     Fetch WHOIS/ASN information for an IP address.
 
     Args:
         ip_address (str): The IP address to look up
+        force_refresh (bool): If True, bypass cache and force fresh lookup
 
     Returns:
         dict: Result dictionary with WHOIS information or error
@@ -500,32 +501,35 @@ def fetch_ip_whois_info(self, ip_address):
     try:
         logger.info(f"Fetching WHOIS information for IP: {ip_address}")
 
-        # Check if we already have recent information for this IP
-        try:
-            existing_info = IPWhoisInfo.objects.get(ip_address=ip_address)
+        # Check if we already have recent information for this IP (unless force_refresh is True)
+        if not force_refresh:
+            try:
+                existing_info = IPWhoisInfo.objects.get(ip_address=ip_address)
 
-            # Check if the information is recent (less than 24 hours old)
-            from django.utils import timezone
+                # Check if the information is recent (less than 24 hours old)
+                from django.utils import timezone
 
-            if timezone.now() - existing_info.updated_at < timezone.timedelta(hours=24):
-                logger.info(f"Using cached WHOIS info for {ip_address}")
-                return {
-                    "success": True,
-                    "ip_address": ip_address,
-                    "cached": True,
-                    "whois_info": {
-                        "asn": existing_info.asn,
-                        "asn_description": existing_info.asn_description,
-                        "organization": existing_info.organization,
-                        "isp": existing_info.isp,
-                        "country": existing_info.country,
-                        "country_code": existing_info.country_code,
-                        "registry": existing_info.registry,
-                        "network_cidr": existing_info.network_cidr,
-                    },
-                }
-        except IPWhoisInfo.DoesNotExist:
-            pass
+                if timezone.now() - existing_info.updated_at < timezone.timedelta(
+                    hours=24
+                ):
+                    logger.info(f"Using cached WHOIS info for {ip_address}")
+                    return {
+                        "success": True,
+                        "ip_address": ip_address,
+                        "cached": True,
+                        "whois_info": {
+                            "asn": existing_info.asn,
+                            "asn_description": existing_info.asn_description,
+                            "organization": existing_info.organization,
+                            "isp": existing_info.isp,
+                            "country": existing_info.country,
+                            "country_code": existing_info.country_code,
+                            "registry": existing_info.registry,
+                            "network_cidr": existing_info.network_cidr,
+                        },
+                    }
+            except IPWhoisInfo.DoesNotExist:
+                pass
 
         # Perform WHOIS lookup
         start_time = time.time()

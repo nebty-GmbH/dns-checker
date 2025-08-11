@@ -141,13 +141,13 @@ class Command(BaseCommand):
                         updated_count += 1
                         continue
 
-                    # Perform the actual WHOIS lookup
+                    # Perform the actual WHOIS lookup with force refresh
                     self.stdout.write(
                         f"  [{i+j}] Refreshing {record.ip_address}...", ending=""
                     )
 
-                    # Create a signature for the celery task
-                    task = fetch_ip_whois_info.s(record.ip_address)
+                    # Create a signature for the celery task with force_refresh=True
+                    task = fetch_ip_whois_info.s(record.ip_address, force_refresh=True)
                     result = task.apply()
 
                     if result.successful() and result.result.get("success"):
